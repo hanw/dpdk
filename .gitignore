@@ -1,0 +1,13 @@
+.tmp_versions
+x86_64-native-linuxapp-gcc
+*.o.cmd
+*.ko.cmd
+*.ko
+*.o
+*.mod.c
+*.mod.o
+*.order
+Module.symvers
+_postbuild
+_postinstall
+build
