@@ -182,6 +182,7 @@ extern "C" {
 #include <rte_devargs.h>
 #include "rte_ether.h"
 #include "rte_eth_ctrl.h"
+#include "rte_dev_info.h"
 
 struct rte_mbuf;
 
@@ -193,19 +194,29 @@ struct rte_eth_stats {
 	uint64_t opackets;  /**< Total number of successfully transmitted packets.*/
 	uint64_t ibytes;    /**< Total number of successfully received bytes. */
 	uint64_t obytes;    /**< Total number of successfully transmitted bytes. */
-	uint64_t imissed;   /**< Total of RX missed packets (e.g full FIFO). */
-	uint64_t ibadcrc;   /**< Total of RX packets with CRC error. */
-	uint64_t ibadlen;   /**< Total of RX packets with bad length. */
+	uint64_t imissed;
+	/**< Deprecated; Total of RX missed packets (e.g full FIFO). */
+	uint64_t ibadcrc;
+	/**< Deprecated; Total of RX packets with CRC error. */
+	uint64_t ibadlen;
+	/**< Deprecated; Total of RX packets with bad length. */
 	uint64_t ierrors;   /**< Total number of erroneous received packets. */
 	uint64_t oerrors;   /**< Total number of failed transmitted packets. */
-	uint64_t imcasts;   /**< Total number of multicast received packets. */
+	uint64_t imcasts;
+	/**< Deprecated; Total number of multicast received packets. */
 	uint64_t rx_nombuf; /**< Total number of RX mbuf allocation failures. */
-	uint64_t fdirmatch; /**< Total number of RX packets matching a filter. */
-	uint64_t fdirmiss;  /**< Total number of RX packets not matching any filter. */
-	uint64_t tx_pause_xon;  /**< Total nb. of XON pause frame sent. */
-	uint64_t rx_pause_xon;  /**< Total nb. of XON pause frame received. */
-	uint64_t tx_pause_xoff; /**< Total nb. of XOFF pause frame sent. */
-	uint64_t rx_pause_xoff; /**< Total nb. of XOFF pause frame received. */
+	uint64_t fdirmatch;
+	/**< Deprecated; Total number of RX packets matching a filter. */
+	uint64_t fdirmiss;
+	/**< Deprecated; Total number of RX packets not matching any filter. */
+	uint64_t tx_pause_xon;
+	 /**< Deprecated; Total nb. of XON pause frame sent. */
+	uint64_t rx_pause_xon;
+	/**< Deprecated; Total nb. of XON pause frame received. */
+	uint64_t tx_pause_xoff;
+	/**< Deprecated; Total nb. of XOFF pause frame sent. */
+	uint64_t rx_pause_xoff;
+	/**< Deprecated; Total nb. of XOFF pause frame received. */
 	uint64_t q_ipackets[RTE_ETHDEV_QUEUE_STAT_CNTRS];
 	/**< Total number of queue RX packets. */
 	uint64_t q_opackets[RTE_ETHDEV_QUEUE_STAT_CNTRS];
@@ -1255,6 +1266,24 @@ typedef int (*eth_timesync_read_tx_timestamp_t)(struct rte_eth_dev *dev,
 						struct timespec *timestamp);
 /**< @internal Function used to read a TX IEEE1588/802.1AS timestamp. */
 
+typedef int (*eth_get_reg_length_t)(struct rte_eth_dev *dev);
+/**< @internal Retrieve device register count  */
+
+typedef int (*eth_get_reg_t)(struct rte_eth_dev *dev,
+				struct rte_dev_reg_info *info);
+/**< @internal Retrieve registers  */
+
+typedef int (*eth_get_eeprom_length_t)(struct rte_eth_dev *dev);
+/**< @internal Retrieve eeprom size  */
+
+typedef int (*eth_get_eeprom_t)(struct rte_eth_dev *dev,
+				struct rte_dev_eeprom_info *info);
+/**< @internal Retrieve eeprom data  */
+
+typedef int (*eth_set_eeprom_t)(struct rte_eth_dev *dev,
+				struct rte_dev_eeprom_info *info);
+/**< @internal Program eeprom data  */
+
 #ifdef RTE_NIC_BYPASS
 
 enum {
@@ -1394,6 +1423,17 @@ struct eth_dev_ops {
 	reta_update_t reta_update;
 	/** Query redirection table. */
 	reta_query_t reta_query;
+
+	eth_get_reg_length_t get_reg_length;
+	/**< Get # of registers */
+	eth_get_reg_t get_reg;
+	/**< Get registers */
+	eth_get_eeprom_length_t get_eeprom_length;
+	/**< Get eeprom length */
+	eth_get_eeprom_t get_eeprom;
+	/**< Get eeprom data */
+	eth_set_eeprom_t set_eeprom;
+	/**< Set eeprom */
   /* bypass control */
 #ifdef RTE_NIC_BYPASS
   bypass_init_t bypass_init;
@@ -1606,8 +1646,9 @@ extern struct rte_eth_dev rte_eth_devices[];
 extern uint8_t rte_eth_dev_count(void);
 
 /**
- * Function for internal use by port hotplug functions.
+ * @internal
  * Returns a ethdev slot specified by the unique identifier name.
+ *
  * @param	name
  *  The pointer to the Unique identifier name for each Ethernet device
  * @return
@@ -1616,8 +1657,7 @@ extern uint8_t rte_eth_dev_count(void);
 extern struct rte_eth_dev *rte_eth_dev_allocated(const char *name);
 
 /**
- * Function for internal use by dummy drivers primarily, e.g. ring-based
- * driver.
+ * @internal
  * Allocates a new ethdev slot for an ethernet device and returns the pointer
  * to that slot for the driver to use.
  *
@@ -1630,8 +1670,7 @@ struct rte_eth_dev *rte_eth_dev_allocate(const char *name,
 		enum rte_eth_dev_type type);
 
 /**
- * Function for internal use by dummy drivers primarily, e.g. ring-based
- * driver.
+ * @internal
  * Release the specified ethdev port.
  *
  * @param eth_dev
@@ -1889,6 +1928,17 @@ extern int rte_eth_tx_queue_setup(uint8_t port_id, uint16_t tx_queue_id,
  *   -1 is returned is the port_id value is out of range.
  */
 extern int rte_eth_dev_socket_id(uint8_t port_id);
+
+/*
+ * Check if port_id of device is attached
+ *
+ * @param port_id
+ *   The port identifier of the Ethernet device
+ * @return
+ *   - 0 if port is out of range or not attached
+ *   - 1 if device is attached
+ */
+extern int rte_eth_dev_is_valid_port(uint8_t port_id);
 
 /*
  * Allocate mbuf from mempool, setup the DMA physical address
@@ -3021,6 +3071,22 @@ int rte_eth_dev_mac_addr_add(uint8_t port, struct ether_addr *mac_addr,
 int rte_eth_dev_mac_addr_remove(uint8_t port, struct ether_addr *mac_addr);
 
 /**
+ * Set the default MAC address.
+ *
+ * @param port
+ *   The port identifier of the Ethernet device.
+ * @param mac_addr
+ *   New default MAC address.
+ * @return
+ *   - (0) if successful, or *mac_addr* didn't exist.
+ *   - (-ENOTSUP) if hardware doesn't support.
+ *   - (-ENODEV) if *port* invalid.
+ *   - (-EINVAL) if MAC address is invalid.
+ */
+int rte_eth_dev_default_mac_addr_set(uint8_t port, struct ether_addr *mac_addr);
+
+
+/**
  * Update Redirection Table(RETA) of Receive Side Scaling of Ethernet device.
  *
  * @param port
@@ -3653,6 +3719,79 @@ int rte_eth_remove_rx_callback(uint8_t port_id, uint16_t queue_id,
  */
 int rte_eth_remove_tx_callback(uint8_t port_id, uint16_t queue_id,
 		struct rte_eth_rxtx_callback *user_cb);
+
+/**
+ * Retrieve number of available registers for access
+ *
+ * @param port_id
+ *   The port identifier of the Ethernet device.
+ * @return
+ *   - (>=0) number of registers if successful.
+ *   - (-ENOTSUP) if hardware doesn't support.
+ *   - (-ENODEV) if *port_id* invalid.
+ *   - others depends on the specific operations implementation.
+ */
+int rte_eth_dev_get_reg_length(uint8_t port_id);
+
+/**
+ * Retrieve device registers and register attributes
+ *
+ * @param port_id
+ *   The port identifier of the Ethernet device.
+ * @param info
+ *   The template includes buffer for register data and attribute to be filled.
+ * @return
+ *   - (0) if successful.
+ *   - (-ENOTSUP) if hardware doesn't support.
+ *   - (-ENODEV) if *port_id* invalid.
+ *   - others depends on the specific operations implementation.
+ */
+int rte_eth_dev_get_reg_info(uint8_t port_id, struct rte_dev_reg_info *info);
+
+/**
+ * Retrieve size of device EEPROM
+ *
+ * @param port_id
+ *   The port identifier of the Ethernet device.
+ * @return
+ *   - (>=0) EEPROM size if successful.
+ *   - (-ENOTSUP) if hardware doesn't support.
+ *   - (-ENODEV) if *port_id* invalid.
+ *   - others depends on the specific operations implementation.
+ */
+int rte_eth_dev_get_eeprom_length(uint8_t port_id);
+
+/**
+ * Retrieve EEPROM and EEPROM attribute
+ *
+ * @param port_id
+ *   The port identifier of the Ethernet device.
+ * @param info
+ *   The template includes buffer for return EEPROM data and
+ *   EEPROM attributes to be filled.
+ * @return
+ *   - (0) if successful.
+ *   - (-ENOTSUP) if hardware doesn't support.
+ *   - (-ENODEV) if *port_id* invalid.
+ *   - others depends on the specific operations implementation.
+ */
+int rte_eth_dev_get_eeprom(uint8_t port_id, struct rte_dev_eeprom_info *info);
+
+/**
+ * Program EEPROM with provided data
+ *
+ * @param port_id
+ *   The port identifier of the Ethernet device.
+ * @param info
+ *   The template includes EEPROM data for programming and
+ *   EEPROM attributes to be filled
+ * @return
+ *   - (0) if successful.
+ *   - (-ENOTSUP) if hardware doesn't support.
+ *   - (-ENODEV) if *port_id* invalid.
+ *   - others depends on the specific operations implementation.
+ */
+int rte_eth_dev_set_eeprom(uint8_t port_id, struct rte_dev_eeprom_info *info);
 
 #ifdef __cplusplus
 }

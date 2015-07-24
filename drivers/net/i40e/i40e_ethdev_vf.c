@@ -298,8 +298,8 @@ i40evf_wait_cmd_done(struct rte_eth_dev *dev,
 	int i = 0;
 	enum i40evf_aq_result ret;
 
-#define MAX_TRY_TIMES 10
-#define ASQ_DELAY_MS  50
+#define MAX_TRY_TIMES 20
+#define ASQ_DELAY_MS  100
 	do {
 		/* Delay some time first */
 		rte_delay_ms(ASQ_DELAY_MS);
@@ -361,6 +361,7 @@ i40evf_execute_vf_cmd(struct rte_eth_dev *dev, struct vf_cmd_info *args)
 		     args->in_args, args->in_args_size, NULL);
 	if (err) {
 		PMD_DRV_LOG(ERR, "fail to send cmd %d", args->ops);
+		_clear_cmd(vf);
 		return err;
 	}
 
@@ -368,8 +369,10 @@ i40evf_execute_vf_cmd(struct rte_eth_dev *dev, struct vf_cmd_info *args)
 	/* read message and it's expected one */
 	if (!err && args->ops == info.ops)
 		_clear_cmd(vf);
-	else if (err)
+	else if (err) {
 		PMD_DRV_LOG(ERR, "Failed to read message from AdminQ");
+		_clear_cmd(vf);
+	}
 	else if (args->ops != info.ops)
 		PMD_DRV_LOG(ERR, "command mismatch, expect %u, get %u",
 			    args->ops, info.ops);
@@ -794,7 +797,7 @@ i40evf_stop_queues(struct rte_eth_dev *dev)
 	/* Stop TX queues first */
 	for (i = 0; i < dev->data->nb_tx_queues; i++) {
 		if (i40evf_dev_tx_queue_stop(dev, i) != 0) {
-			PMD_DRV_LOG(ERR, "Fail to start queue %u", i);
+			PMD_DRV_LOG(ERR, "Fail to stop queue %u", i);
 			return -1;
 		}
 	}
@@ -802,7 +805,7 @@ i40evf_stop_queues(struct rte_eth_dev *dev)
 	/* Then stop RX queues */
 	for (i = 0; i < dev->data->nb_rx_queues; i++) {
 		if (i40evf_dev_rx_queue_stop(dev, i) != 0) {
-			PMD_DRV_LOG(ERR, "Fail to start queue %u", i);
+			PMD_DRV_LOG(ERR, "Fail to stop queue %u", i);
 			return -1;
 		}
 	}
@@ -1146,6 +1149,22 @@ err:
 }
 
 static int
+i40evf_uninit_vf(struct rte_eth_dev *dev)
+{
+	struct i40e_vf *vf = I40EVF_DEV_PRIVATE_TO_VF(dev->data->dev_private);
+	struct i40e_hw *hw = I40E_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+
+	PMD_INIT_FUNC_TRACE();
+
+	if (hw->adapter_stopped == 0)
+		i40evf_dev_close(dev);
+	rte_free(vf->vf_res);
+	vf->vf_res = NULL;
+
+	return 0;
+}
+
+static int
 i40evf_dev_init(struct rte_eth_dev *eth_dev)
 {
 	struct i40e_hw *hw = I40E_DEV_PRIVATE_TO_HW(\
@@ -1175,6 +1194,7 @@ i40evf_dev_init(struct rte_eth_dev *eth_dev)
 	hw->bus.device = eth_dev->pci_dev->addr.devid;
 	hw->bus.func = eth_dev->pci_dev->addr.function;
 	hw->hw_addr = (void *)eth_dev->pci_dev->mem_resource[0].addr;
+	hw->adapter_stopped = 0;
 
 	if(i40evf_init_vf(eth_dev) != 0) {
 		PMD_INIT_LOG(ERR, "Init vf failed");
@@ -1195,6 +1215,28 @@ i40evf_dev_init(struct rte_eth_dev *eth_dev)
 	return 0;
 }
 
+static int
+i40evf_dev_uninit(struct rte_eth_dev *eth_dev)
+{
+	PMD_INIT_FUNC_TRACE();
+
+	if (rte_eal_process_type() != RTE_PROC_PRIMARY)
+		return -EPERM;
+
+	eth_dev->dev_ops = NULL;
+	eth_dev->rx_pkt_burst = NULL;
+	eth_dev->tx_pkt_burst = NULL;
+
+	if (i40evf_uninit_vf(eth_dev) != 0) {
+		PMD_INIT_LOG(ERR, "i40evf_uninit_vf failed");
+		return -1;
+	}
+
+	rte_free(eth_dev->data->mac_addrs);
+	eth_dev->data->mac_addrs = NULL;
+
+	return 0;
+}
 /*
  * virtual function driver struct
  */
@@ -1202,9 +1244,10 @@ static struct eth_driver rte_i40evf_pmd = {
 	.pci_drv = {
 		.name = "rte_i40evf_pmd",
 		.id_table = pci_id_i40evf_map,
-		.drv_flags = RTE_PCI_DRV_NEED_MAPPING,
+		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_DETACHABLE,
 	},
 	.eth_dev_init = i40evf_dev_init,
+	.eth_dev_uninit = i40evf_dev_uninit,
 	.dev_private_size = sizeof(struct i40e_vf),
 };
 
@@ -1391,7 +1434,7 @@ i40evf_dev_tx_queue_stop(struct rte_eth_dev *dev, uint16_t tx_queue_id)
 		err = i40evf_switch_queue(dev, FALSE, tx_queue_id, FALSE);
 
 		if (err) {
-			PMD_DRV_LOG(ERR, "Failed to switch TX queue %u of",
+			PMD_DRV_LOG(ERR, "Failed to switch TX queue %u off",
 				    tx_queue_id);
 			return err;
 		}
@@ -1481,6 +1524,8 @@ i40evf_rx_init(struct rte_eth_dev *dev)
 
 	i40evf_config_rss(vf);
 	for (i = 0; i < dev->data->nb_rx_queues; i++) {
+		if (!rxq[i] || !rxq[i]->q_set)
+			continue;
 		if (i40evf_rxq_init(dev, rxq[i]) < 0)
 			return -EFAULT;
 	}
@@ -1523,6 +1568,8 @@ i40evf_dev_start(struct rte_eth_dev *dev)
 	struct ether_addr mac_addr;
 
 	PMD_INIT_FUNC_TRACE();
+
+	hw->adapter_stopped = 0;
 
 	vf->max_pkt_len = dev->data->dev_conf.rxmode.max_rx_pkt_len;
 	vf->num_queue_pairs = RTE_MAX(dev->data->nb_rx_queues,
@@ -1575,6 +1622,7 @@ i40evf_dev_stop(struct rte_eth_dev *dev)
 
 	i40evf_disable_queues_intr(hw);
 	i40evf_stop_queues(dev);
+	i40e_dev_clear_queues(dev);
 }
 
 static int
@@ -1723,6 +1771,8 @@ i40evf_dev_close(struct rte_eth_dev *dev)
 	struct i40e_hw *hw = I40E_DEV_PRIVATE_TO_HW(dev->data->dev_private);
 
 	i40evf_dev_stop(dev);
+	hw->adapter_stopped = 1;
+	i40e_dev_free_queues(dev);
 	i40evf_reset_vf(hw);
 	i40e_shutdown_adminq(hw);
 }
@@ -1857,6 +1907,7 @@ i40evf_config_rss(struct i40e_vf *vf)
 	struct i40e_hw *hw = I40E_VF_TO_HW(vf);
 	struct rte_eth_rss_conf rss_conf;
 	uint32_t i, j, lut = 0, nb_q = (I40E_VFQF_HLUT_MAX_INDEX + 1) * 4;
+	uint16_t num;
 
 	if (vf->dev_data->dev_conf.rxmode.mq_mode != ETH_MQ_RX_RSS) {
 		i40evf_disable_rss(vf);
@@ -1864,9 +1915,10 @@ i40evf_config_rss(struct i40e_vf *vf)
 		return 0;
 	}
 
+	num = i40e_align_floor(vf->dev_data->nb_rx_queues);
 	/* Fill out the look up table */
 	for (i = 0, j = 0; i < nb_q; i++, j++) {
-		if (j >= vf->num_queue_pairs)
+		if (j >= num)
 			j = 0;
 		lut = (lut << 8) | j;
 		if ((i & 3) == 3)

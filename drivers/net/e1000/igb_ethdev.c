@@ -55,6 +55,7 @@
 #include "e1000_logs.h"
 #include "base/e1000_api.h"
 #include "e1000_ethdev.h"
+#include "igb_regs.h"
 
 /*
  * Default values for port configuration
@@ -137,6 +138,8 @@ static void eth_igb_rar_set(struct rte_eth_dev *dev,
 		struct ether_addr *mac_addr,
 		uint32_t index, uint32_t pool);
 static void eth_igb_rar_clear(struct rte_eth_dev *dev, uint32_t index);
+static void eth_igb_default_mac_addr_set(struct rte_eth_dev *dev,
+		struct ether_addr *addr);
 
 static void igbvf_intr_disable(struct e1000_hw *hw);
 static int igbvf_dev_configure(struct rte_eth_dev *dev);
@@ -150,6 +153,12 @@ static int igbvf_vlan_filter_set(struct rte_eth_dev *dev,
 		uint16_t vlan_id, int on);
 static int igbvf_set_vfta(struct e1000_hw *hw, uint16_t vid, bool on);
 static void igbvf_set_vfta_all(struct rte_eth_dev *dev, bool on);
+static void igbvf_default_mac_addr_set(struct rte_eth_dev *dev,
+		struct ether_addr *addr);
+static int igbvf_get_reg_length(struct rte_eth_dev *dev);
+static int igbvf_get_regs(struct rte_eth_dev *dev,
+		struct rte_dev_reg_info *regs);
+
 static int eth_igb_rss_reta_update(struct rte_eth_dev *dev,
 				   struct rte_eth_rss_reta_entry64 *reta_conf,
 				   uint16_t reta_size);
@@ -201,6 +210,14 @@ static int eth_igb_filter_ctrl(struct rte_eth_dev *dev,
 		     enum rte_filter_type filter_type,
 		     enum rte_filter_op filter_op,
 		     void *arg);
+static int eth_igb_get_reg_length(struct rte_eth_dev *dev);
+static int eth_igb_get_regs(struct rte_eth_dev *dev,
+		struct rte_dev_reg_info *regs);
+static int eth_igb_get_eeprom_length(struct rte_eth_dev *dev);
+static int eth_igb_get_eeprom(struct rte_eth_dev *dev,
+		struct rte_dev_eeprom_info *eeprom);
+static int eth_igb_set_eeprom(struct rte_eth_dev *dev,
+		struct rte_dev_eeprom_info *eeprom);
 
 static int eth_igb_set_mc_addr_list(struct rte_eth_dev *dev,
 				    struct ether_addr *mc_addr_set,
@@ -283,6 +300,7 @@ static const struct eth_dev_ops eth_igb_ops = {
 	.flow_ctrl_set        = eth_igb_flow_ctrl_set,
 	.mac_addr_add         = eth_igb_rar_set,
 	.mac_addr_remove      = eth_igb_rar_clear,
+	.mac_addr_set         = eth_igb_default_mac_addr_set,
 	.reta_update          = eth_igb_rss_reta_update,
 	.reta_query           = eth_igb_rss_reta_query,
 	.rss_hash_update      = eth_igb_rss_hash_update,
@@ -293,6 +311,11 @@ static const struct eth_dev_ops eth_igb_ops = {
 	.timesync_disable     = igb_timesync_disable,
 	.timesync_read_rx_timestamp = igb_timesync_read_rx_timestamp,
 	.timesync_read_tx_timestamp = igb_timesync_read_tx_timestamp,
+	.get_reg_length       = eth_igb_get_reg_length,
+	.get_reg              = eth_igb_get_regs,
+	.get_eeprom_length    = eth_igb_get_eeprom_length,
+	.get_eeprom           = eth_igb_get_eeprom,
+	.set_eeprom           = eth_igb_set_eeprom,
 };
 
 /*
@@ -314,6 +337,9 @@ static const struct eth_dev_ops igbvf_eth_dev_ops = {
 	.tx_queue_setup       = eth_igb_tx_queue_setup,
 	.tx_queue_release     = eth_igb_tx_queue_release,
 	.set_mc_addr_list     = eth_igb_set_mc_addr_list,
+	.mac_addr_set         = igbvf_default_mac_addr_set,
+	.get_reg_length       = igbvf_get_reg_length,
+	.get_reg              = igbvf_get_regs,
 };
 
 /**
@@ -484,9 +510,12 @@ eth_igb_dev_init(struct rte_eth_dev *eth_dev)
 	struct e1000_hw *hw =
 		E1000_DEV_PRIVATE_TO_HW(eth_dev->data->dev_private);
 	struct e1000_vfta * shadow_vfta =
-			E1000_DEV_PRIVATE_TO_VFTA(eth_dev->data->dev_private);
+		E1000_DEV_PRIVATE_TO_VFTA(eth_dev->data->dev_private);
 	struct e1000_filter_info *filter_info =
 		E1000_DEV_PRIVATE_TO_FILTER_INFO(eth_dev->data->dev_private);
+	struct e1000_adapter *adapter =
+		E1000_DEV_PRIVATE(eth_dev->data->dev_private);
+
 	uint32_t ctrl_ext;
 
 	pci_dev = eth_dev->pci_dev;
@@ -589,6 +618,7 @@ eth_igb_dev_init(struct rte_eth_dev *eth_dev)
 		goto err_late;
 	}
 	hw->mac.get_link_status = 1;
+	adapter->stopped = 0;
 
 	/* Indicate SOL/IDER usage */
 	if (e1000_check_reset_block(hw) < 0) {
@@ -633,6 +663,46 @@ err_late:
 	return (error);
 }
 
+static int
+eth_igb_dev_uninit(struct rte_eth_dev *eth_dev)
+{
+	struct rte_pci_device *pci_dev;
+	struct e1000_hw *hw;
+	struct e1000_adapter *adapter =
+		E1000_DEV_PRIVATE(eth_dev->data->dev_private);
+
+	PMD_INIT_FUNC_TRACE();
+
+	if (rte_eal_process_type() != RTE_PROC_PRIMARY)
+		return -EPERM;
+
+	hw = E1000_DEV_PRIVATE_TO_HW(eth_dev->data->dev_private);
+	pci_dev = eth_dev->pci_dev;
+
+	if (adapter->stopped == 0)
+		eth_igb_close(eth_dev);
+
+	eth_dev->dev_ops = NULL;
+	eth_dev->rx_pkt_burst = NULL;
+	eth_dev->tx_pkt_burst = NULL;
+
+	/* Reset any pending lock */
+	igb_reset_swfw_lock(hw);
+
+	rte_free(eth_dev->data->mac_addrs);
+	eth_dev->data->mac_addrs = NULL;
+
+	/* uninitialize PF if max_vfs not zero */
+	igb_pf_host_uninit(eth_dev);
+
+	/* disable uio intr before callback unregister */
+	rte_intr_disable(&(pci_dev->intr_handle));
+	rte_intr_callback_unregister(&(pci_dev->intr_handle),
+		eth_igb_interrupt_handler, (void *)eth_dev);
+
+	return 0;
+}
+
 /*
  * Virtual Function device init
  */
@@ -640,6 +710,8 @@ static int
 eth_igbvf_dev_init(struct rte_eth_dev *eth_dev)
 {
 	struct rte_pci_device *pci_dev;
+	struct e1000_adapter *adapter =
+		E1000_DEV_PRIVATE(eth_dev->data->dev_private);
 	struct e1000_hw *hw =
 		E1000_DEV_PRIVATE_TO_HW(eth_dev->data->dev_private);
 	int diag;
@@ -664,6 +736,7 @@ eth_igbvf_dev_init(struct rte_eth_dev *eth_dev)
 	hw->device_id = pci_dev->id.device_id;
 	hw->vendor_id = pci_dev->id.vendor_id;
 	hw->hw_addr = (void *)pci_dev->mem_resource[0].addr;
+	adapter->stopped = 0;
 
 	/* Initialize the shared code (base driver) */
 	diag = e1000_setup_init_funcs(hw, TRUE);
@@ -704,13 +777,39 @@ eth_igbvf_dev_init(struct rte_eth_dev *eth_dev)
 	return 0;
 }
 
+static int
+eth_igbvf_dev_uninit(struct rte_eth_dev *eth_dev)
+{
+	struct e1000_adapter *adapter =
+		E1000_DEV_PRIVATE(eth_dev->data->dev_private);
+
+	PMD_INIT_FUNC_TRACE();
+
+	if (rte_eal_process_type() != RTE_PROC_PRIMARY)
+		return -EPERM;
+
+	if (adapter->stopped == 0)
+		igbvf_dev_close(eth_dev);
+
+	eth_dev->dev_ops = NULL;
+	eth_dev->rx_pkt_burst = NULL;
+	eth_dev->tx_pkt_burst = NULL;
+
+	rte_free(eth_dev->data->mac_addrs);
+	eth_dev->data->mac_addrs = NULL;
+
+	return 0;
+}
+
 static struct eth_driver rte_igb_pmd = {
 	.pci_drv = {
 		.name = "rte_igb_pmd",
 		.id_table = pci_id_igb_map,
-		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_INTR_LSC,
+		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_INTR_LSC |
+			RTE_PCI_DRV_DETACHABLE,
 	},
 	.eth_dev_init = eth_igb_dev_init,
+	.eth_dev_uninit = eth_igb_dev_uninit,
 	.dev_private_size = sizeof(struct e1000_adapter),
 };
 
@@ -721,9 +820,10 @@ static struct eth_driver rte_igbvf_pmd = {
 	.pci_drv = {
 		.name = "rte_igbvf_pmd",
 		.id_table = pci_id_igbvf_map,
-		.drv_flags = RTE_PCI_DRV_NEED_MAPPING,
+		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_DETACHABLE,
 	},
 	.eth_dev_init = eth_igbvf_dev_init,
+	.eth_dev_uninit = eth_igbvf_dev_uninit,
 	.dev_private_size = sizeof(struct e1000_adapter),
 };
 
@@ -777,6 +877,8 @@ eth_igb_start(struct rte_eth_dev *dev)
 {
 	struct e1000_hw *hw =
 		E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	struct e1000_adapter *adapter =
+		E1000_DEV_PRIVATE(dev->data->dev_private);
 	int ret, i, mask;
 	uint32_t ctrl_ext;
 
@@ -805,6 +907,7 @@ eth_igb_start(struct rte_eth_dev *dev)
 		PMD_INIT_LOG(ERR, "Unable to initialize the hardware");
 		return (-EIO);
 	}
+	adapter->stopped = 0;
 
 	E1000_WRITE_REG(hw, E1000_VET, ETHER_TYPE_VLAN << 16 | ETHER_TYPE_VLAN);
 
@@ -1011,9 +1114,13 @@ static void
 eth_igb_close(struct rte_eth_dev *dev)
 {
 	struct e1000_hw *hw = E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	struct e1000_adapter *adapter =
+		E1000_DEV_PRIVATE(dev->data->dev_private);
 	struct rte_eth_link link;
 
 	eth_igb_stop(dev);
+	adapter->stopped = 1;
+
 	e1000_phy_hw_reset(hw);
 	igb_release_manageability(hw);
 	igb_hw_control_release(hw);
@@ -1027,7 +1134,7 @@ eth_igb_close(struct rte_eth_dev *dev)
 		E1000_WRITE_REG(hw, E1000_82580_PHY_POWER_MGMT, phpm_reg);
 	}
 
-	igb_dev_clear_queues(dev);
+	igb_dev_free_queues(dev);
 
 	memset(&link, 0, sizeof(link));
 	rte_igb_dev_atomic_write_link_status(dev, &link);
@@ -2133,6 +2240,14 @@ eth_igb_rar_clear(struct rte_eth_dev *dev, uint32_t index)
 	e1000_rar_set(hw, addr, index);
 }
 
+static void
+eth_igb_default_mac_addr_set(struct rte_eth_dev *dev,
+				struct ether_addr *addr)
+{
+	eth_igb_rar_clear(dev, 0);
+
+	eth_igb_rar_set(dev, (void *)addr, 0, 0);
+}
 /*
  * Virtual Function operations
  */
@@ -2248,11 +2363,14 @@ igbvf_dev_start(struct rte_eth_dev *dev)
 {
 	struct e1000_hw *hw =
 		E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	struct e1000_adapter *adapter =
+		E1000_DEV_PRIVATE(dev->data->dev_private);
 	int ret;
 
 	PMD_INIT_FUNC_TRACE();
 
 	hw->mac.ops.reset_hw(hw);
+	adapter->stopped = 0;
 
 	/* Set all vfta */
 	igbvf_set_vfta_all(dev,1);
@@ -2290,12 +2408,16 @@ static void
 igbvf_dev_close(struct rte_eth_dev *dev)
 {
 	struct e1000_hw *hw = E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	struct e1000_adapter *adapter =
+		E1000_DEV_PRIVATE(dev->data->dev_private);
 
 	PMD_INIT_FUNC_TRACE();
 
 	e1000_reset_hw(hw);
 
 	igbvf_dev_stop(dev);
+	adapter->stopped = 1;
+	igb_dev_free_queues(dev);
 }
 
 static int igbvf_set_vfta(struct e1000_hw *hw, uint16_t vid, bool on)
@@ -2366,6 +2488,17 @@ igbvf_vlan_filter_set(struct rte_eth_dev *dev, uint16_t vlan_id, int on)
 
 	return 0;
 }
+
+static void
+igbvf_default_mac_addr_set(struct rte_eth_dev *dev, struct ether_addr *addr)
+{
+	struct e1000_hw *hw =
+		E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+
+	/* index is not used by rar_set() */
+	hw->mac.ops.rar_set(hw, (void *)addr, 0);
+}
+
 
 static int
 eth_igb_rss_reta_update(struct rte_eth_dev *dev,
@@ -3776,6 +3909,136 @@ igb_timesync_read_tx_timestamp(struct rte_eth_dev *dev,
 	timestamp->tv_nsec = 0;
 
 	return  0;
+}
+
+static int
+eth_igb_get_reg_length(struct rte_eth_dev *dev __rte_unused)
+{
+	int count = 0;
+	int g_ind = 0;
+	const struct reg_info *reg_group;
+
+	while ((reg_group = igb_regs[g_ind++]))
+		count += igb_reg_group_count(reg_group);
+
+	return count;
+}
+
+static int
+igbvf_get_reg_length(struct rte_eth_dev *dev __rte_unused)
+{
+	int count = 0;
+	int g_ind = 0;
+	const struct reg_info *reg_group;
+
+	while ((reg_group = igbvf_regs[g_ind++]))
+		count += igb_reg_group_count(reg_group);
+
+	return count;
+}
+
+static int
+eth_igb_get_regs(struct rte_eth_dev *dev,
+	struct rte_dev_reg_info *regs)
+{
+	struct e1000_hw *hw = E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	uint32_t *data = regs->data;
+	int g_ind = 0;
+	int count = 0;
+	const struct reg_info *reg_group;
+
+	/* Support only full register dump */
+	if ((regs->length == 0) ||
+	    (regs->length == (uint32_t)eth_igb_get_reg_length(dev))) {
+		regs->version = hw->mac.type << 24 | hw->revision_id << 16 |
+			hw->device_id;
+		while ((reg_group = igb_regs[g_ind++]))
+			count += igb_read_regs_group(dev, &data[count],
+							reg_group);
+		return 0;
+	}
+
+	return -ENOTSUP;
+}
+
+static int
+igbvf_get_regs(struct rte_eth_dev *dev,
+	struct rte_dev_reg_info *regs)
+{
+	struct e1000_hw *hw = E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	uint32_t *data = regs->data;
+	int g_ind = 0;
+	int count = 0;
+	const struct reg_info *reg_group;
+
+	/* Support only full register dump */
+	if ((regs->length == 0) ||
+	    (regs->length == (uint32_t)igbvf_get_reg_length(dev))) {
+		regs->version = hw->mac.type << 24 | hw->revision_id << 16 |
+			hw->device_id;
+		while ((reg_group = igbvf_regs[g_ind++]))
+			count += igb_read_regs_group(dev, &data[count],
+							reg_group);
+		return 0;
+	}
+
+	return -ENOTSUP;
+}
+
+static int
+eth_igb_get_eeprom_length(struct rte_eth_dev *dev)
+{
+	struct e1000_hw *hw = E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+
+	/* Return unit is byte count */
+	return hw->nvm.word_size * 2;
+}
+
+static int
+eth_igb_get_eeprom(struct rte_eth_dev *dev,
+	struct rte_dev_eeprom_info *in_eeprom)
+{
+	struct e1000_hw *hw = E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	struct e1000_nvm_info *nvm = &hw->nvm;
+	uint16_t *data = in_eeprom->data;
+	int first, length;
+
+	first = in_eeprom->offset >> 1;
+	length = in_eeprom->length >> 1;
+	if ((first >= hw->nvm.word_size) ||
+	    ((first + length) >= hw->nvm.word_size))
+		return -EINVAL;
+
+	in_eeprom->magic = hw->vendor_id |
+		((uint32_t)hw->device_id << 16);
+
+	if ((nvm->ops.read) == NULL)
+		return -ENOTSUP;
+
+	return nvm->ops.read(hw, first, length, data);
+}
+
+static int
+eth_igb_set_eeprom(struct rte_eth_dev *dev,
+	struct rte_dev_eeprom_info *in_eeprom)
+{
+	struct e1000_hw *hw = E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	struct e1000_nvm_info *nvm = &hw->nvm;
+	uint16_t *data = in_eeprom->data;
+	int first, length;
+
+	first = in_eeprom->offset >> 1;
+	length = in_eeprom->length >> 1;
+	if ((first >= hw->nvm.word_size) ||
+	    ((first + length) >= hw->nvm.word_size))
+		return -EINVAL;
+
+	in_eeprom->magic = (uint32_t)hw->vendor_id |
+		((uint32_t)hw->device_id << 16);
+
+	if ((nvm->ops.write) == NULL)
+		return -ENOTSUP;
+	return nvm->ops.write(hw,  first, length, data);
 }
 
 static struct rte_driver pmd_igb_drv = {

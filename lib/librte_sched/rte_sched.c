@@ -184,6 +184,21 @@ enum grinder_state {
 	e_GRINDER_READ_MBUF
 };
 
+/*
+ * Path through the scheduler hierarchy used by the scheduler enqueue
+ * operation to identify the destination queue for the current
+ * packet. Stored in the field pkt.hash.sched of struct rte_mbuf of
+ * each packet, typically written by the classification stage and read
+ * by scheduler enqueue.
+ */
+struct __rte_sched_port_hierarchy {
+	uint32_t queue:2;                /**< Queue ID (0 .. 3) */
+	uint32_t traffic_class:2;        /**< Traffic class ID (0 .. 3)*/
+	uint32_t pipe:20;                /**< Pipe ID */
+	uint32_t subport:6;              /**< Subport ID */
+	uint32_t color:2;                /**< Color */
+};
+
 struct rte_sched_grinder {
 	/* Pipe cache */
 	uint16_t pcache_qmask[RTE_SCHED_GRINDER_PCACHE_SIZE];
@@ -448,7 +463,8 @@ rte_sched_port_get_memory_footprint(struct rte_sched_port_params *params)
 
 	status = rte_sched_port_check_params(params);
 	if (status != 0) {
-		RTE_LOG(INFO, SCHED, "Port scheduler params check failed (%d)\n", status);
+		RTE_LOG(NOTICE, SCHED,
+			"Port scheduler params check failed (%d)\n", status);
 
 		return 0;
 	}
@@ -494,11 +510,11 @@ rte_sched_port_log_pipe_profile(struct rte_sched_port *port, uint32_t i)
 {
 	struct rte_sched_pipe_profile *p = port->pipe_profiles + i;
 
-	RTE_LOG(INFO, SCHED, "Low level config for pipe profile %u:\n"
-		"\tToken bucket: period = %u, credits per period = %u, size = %u\n"
-		"\tTraffic classes: period = %u, credits per period = [%u, %u, %u, %u]\n"
-		"\tTraffic class 3 oversubscription: weight = %hhu\n"
-		"\tWRR cost: [%hhu, %hhu, %hhu, %hhu], [%hhu, %hhu, %hhu, %hhu], [%hhu, %hhu, %hhu, %hhu], [%hhu, %hhu, %hhu, %hhu]\n",
+	RTE_LOG(DEBUG, SCHED, "Low level config for pipe profile %u:\n"
+		"    Token bucket: period = %u, credits per period = %u, size = %u\n"
+		"    Traffic classes: period = %u, credits per period = [%u, %u, %u, %u]\n"
+		"    Traffic class 3 oversubscription: weight = %hhu\n"
+		"    WRR cost: [%hhu, %hhu, %hhu, %hhu], [%hhu, %hhu, %hhu, %hhu], [%hhu, %hhu, %hhu, %hhu], [%hhu, %hhu, %hhu, %hhu]\n",
 		i,
 
 		/* Token bucket */
@@ -636,6 +652,12 @@ rte_sched_port_config(struct rte_sched_port_params *params)
 		uint32_t j;
 
 		for (j = 0; j < e_RTE_METER_COLORS; j++) {
+			/* if min/max are both zero, then RED is disabled */
+			if ((params->red_params[i][j].min_th |
+			     params->red_params[i][j].max_th) == 0) {
+				continue;
+			}
+
 			if (rte_red_config_init(&port->red_config[i][j],
 				params->red_params[i][j].wq_log2,
 				params->red_params[i][j].min_th,
@@ -682,7 +704,7 @@ rte_sched_port_config(struct rte_sched_port_params *params)
 	bmp_mem_size = rte_bitmap_get_memory_footprint(n_queues_per_port);
 	port->bmp = rte_bitmap_init(n_queues_per_port, port->bmp_array, bmp_mem_size);
 	if (port->bmp == NULL) {
-		RTE_LOG(INFO, SCHED, "Bitmap init error\n");
+		RTE_LOG(ERR, SCHED, "Bitmap init error\n");
 		return NULL;
 	}
 	for (i = 0; i < RTE_SCHED_PORT_N_GRINDERS; i ++) {
@@ -709,10 +731,10 @@ rte_sched_port_log_subport_config(struct rte_sched_port *port, uint32_t i)
 {
 	struct rte_sched_subport *s = port->subport + i;
 
-	RTE_LOG(INFO, SCHED, "Low level config for subport %u:\n"
-		"\tToken bucket: period = %u, credits per period = %u, size = %u\n"
-		"\tTraffic classes: period = %u, credits per period = [%u, %u, %u, %u]\n"
-		"\tTraffic class 3 oversubscription: wm min = %u, wm max = %u\n",
+	RTE_LOG(DEBUG, SCHED, "Low level config for subport %u:\n"
+		"    Token bucket: period = %u, credits per period = %u, size = %u\n"
+		"    Traffic classes: period = %u, credits per period = [%u, %u, %u, %u]\n"
+		"    Traffic class 3 oversubscription: wm min = %u, wm max = %u\n",
 		i,
 
 		/* Token bucket */
@@ -851,7 +873,8 @@ rte_sched_pipe_config(struct rte_sched_port *port,
 		s->tc_ov = s->tc_ov_rate > subport_tc3_rate;
 
 		if (s->tc_ov != tc3_ov) {
-			RTE_LOG(INFO, SCHED, "Subport %u TC3 oversubscription is OFF (%.4lf >= %.4lf)\n",
+			RTE_LOG(DEBUG, SCHED,
+				"Subport %u TC3 oversubscription is OFF (%.4lf >= %.4lf)\n",
 				subport_id, subport_tc3_rate, s->tc_ov_rate);
 		}
 #endif
@@ -890,7 +913,8 @@ rte_sched_pipe_config(struct rte_sched_port *port,
 		s->tc_ov = s->tc_ov_rate > subport_tc3_rate;
 
 		if (s->tc_ov != tc3_ov) {
-			RTE_LOG(INFO, SCHED, "Subport %u TC3 oversubscription is ON (%.4lf < %.4lf)\n",
+			RTE_LOG(DEBUG, SCHED,
+				"Subport %u TC3 oversubscription is ON (%.4lf < %.4lf)\n",
 				subport_id, subport_tc3_rate, s->tc_ov_rate);
 		}
 		p->tc_ov_period_id = s->tc_ov_period_id;
@@ -899,6 +923,45 @@ rte_sched_pipe_config(struct rte_sched_port *port,
 #endif
 
 	return 0;
+}
+
+void
+rte_sched_port_pkt_write(struct rte_mbuf *pkt,
+			 uint32_t subport, uint32_t pipe, uint32_t traffic_class,
+			 uint32_t queue, enum rte_meter_color color)
+{
+	struct __rte_sched_port_hierarchy *sched
+		= (struct __rte_sched_port_hierarchy *) &pkt->hash.sched;
+
+	sched->color = (uint32_t) color;
+	sched->subport = subport;
+	sched->pipe = pipe;
+	sched->traffic_class = traffic_class;
+	sched->queue = queue;
+}
+
+void
+rte_sched_port_pkt_read_tree_path(const struct rte_mbuf *pkt,
+				  uint32_t *subport, uint32_t *pipe,
+				  uint32_t *traffic_class, uint32_t *queue)
+{
+	const struct __rte_sched_port_hierarchy *sched
+		= (const struct __rte_sched_port_hierarchy *) &pkt->hash.sched;
+
+	*subport = sched->subport;
+	*pipe = sched->pipe;
+	*traffic_class = sched->traffic_class;
+	*queue = sched->queue;
+}
+
+
+enum rte_meter_color
+rte_sched_port_pkt_read_color(const struct rte_mbuf *pkt)
+{
+	const struct __rte_sched_port_hierarchy *sched
+		= (const struct __rte_sched_port_hierarchy *) &pkt->hash.sched;
+
+	return (enum rte_meter_color) sched->color;
 }
 
 int
@@ -1068,6 +1131,9 @@ rte_sched_port_red_drop(struct rte_sched_port *port, struct rte_mbuf *pkt, uint3
 	tc_index = (qindex >> 2) & 0x3;
 	color = rte_sched_port_pkt_read_color(pkt);
 	red_cfg = &port->red_config[tc_index][color];
+
+	if ((red_cfg->min_th | red_cfg->max_th) == 0)
+		return 0;
 
 	qe = port->queue_extra + qindex;
 	red = &qe->red;

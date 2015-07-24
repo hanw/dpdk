@@ -111,7 +111,7 @@
 #define VALID_PORTID_OR_ERR_RET(port_id, retval) do {		\
 	if (!rte_eth_dev_is_valid_port(port_id)) {		\
 		PMD_DEBUG_TRACE("Invalid port_id=%d\n", port_id); \
-		return -EINVAL;					\
+		return retval;					\
 	}							\
 } while (0)
 
@@ -142,17 +142,8 @@ static const struct rte_eth_xstats_name_off rte_stats_strings[] = {
 	{"rx_bytes", offsetof(struct rte_eth_stats, ibytes)},
 	{"tx_bytes", offsetof(struct rte_eth_stats, obytes)},
 	{"tx_errors", offsetof(struct rte_eth_stats, oerrors)},
-	{"rx_missed_errors", offsetof(struct rte_eth_stats, imissed)},
-	{"rx_crc_errors", offsetof(struct rte_eth_stats, ibadcrc)},
-	{"rx_bad_length_errors", offsetof(struct rte_eth_stats, ibadlen)},
 	{"rx_errors", offsetof(struct rte_eth_stats, ierrors)},
 	{"alloc_rx_buff_failed", offsetof(struct rte_eth_stats, rx_nombuf)},
-	{"fdir_match", offsetof(struct rte_eth_stats, fdirmatch)},
-	{"fdir_miss", offsetof(struct rte_eth_stats, fdirmiss)},
-	{"tx_flow_control_xon", offsetof(struct rte_eth_stats, tx_pause_xon)},
-	{"rx_flow_control_xon", offsetof(struct rte_eth_stats, rx_pause_xon)},
-	{"tx_flow_control_xoff", offsetof(struct rte_eth_stats, tx_pause_xoff)},
-	{"rx_flow_control_xoff", offsetof(struct rte_eth_stats, rx_pause_xoff)},
 };
 #define RTE_NB_STATS (sizeof(rte_stats_strings) / sizeof(rte_stats_strings[0]))
 
@@ -296,7 +287,7 @@ rte_eth_dev_release_port(struct rte_eth_dev *eth_dev)
 	if (eth_dev == NULL)
 		return -EINVAL;
 
-	eth_dev->attached = 0;
+	eth_dev->attached = DEV_DETACHED;
 	nb_ports--;
 	return 0;
 }
@@ -351,8 +342,7 @@ rte_eth_dev_init(struct rte_pci_driver *pci_drv,
 			(unsigned) pci_dev->id.device_id);
 	if (rte_eal_process_type() == RTE_PROC_PRIMARY)
 		rte_free(eth_dev->data->dev_private);
-	eth_dev->attached = DEV_DETACHED;
-	nb_ports--;
+	rte_eth_dev_release_port(eth_dev);
 	return diag;
 }
 
@@ -419,7 +409,7 @@ rte_eth_driver_register(struct eth_driver *eth_drv)
 	rte_eal_pci_register(&eth_drv->pci_drv);
 }
 
-static int
+int
 rte_eth_dev_is_valid_port(uint8_t port_id)
 {
 	if (port_id >= RTE_MAX_ETHPORTS ||
@@ -593,9 +583,9 @@ rte_eth_dev_detach_pdev(uint8_t port_id, struct rte_pci_addr *addr)
 	if (rte_eal_compare_pci_addr(&vp, &freed_addr) == 0)
 		goto err;
 
-	/* invoke close func of the driver,
+	/* invoke devuninit func of the pci driver,
 	 * also remove the device from pci_device_list */
-	if (rte_eal_pci_close_one(&freed_addr))
+	if (rte_eal_pci_detach(&freed_addr))
 		goto err;
 
 	*addr = freed_addr;
@@ -665,7 +655,7 @@ rte_eth_dev_detach_vdev(uint8_t port_id, char *vdevname)
 	if (rte_eth_dev_get_name_by_port(port_id, name))
 		goto err;
 	/* walk around dev_driver_list to find the driver of the device,
-	 * then invoke close function o the driver */
+	 * then invoke uninit function of the driver */
 	if (rte_eal_vdev_uninit(name))
 		goto err;
 
@@ -1391,6 +1381,11 @@ rte_eth_dev_close(uint8_t port_id)
 	FUNC_PTR_OR_RET(*dev->dev_ops->dev_close);
 	dev->data->dev_started = 0;
 	(*dev->dev_ops->dev_close)(dev);
+
+	rte_free(dev->data->rx_queues);
+	dev->data->rx_queues = NULL;
+	rte_free(dev->data->tx_queues);
+	dev->data->tx_queues = NULL;
 }
 
 int
@@ -1661,26 +1656,35 @@ rte_eth_xstats_get(uint8_t port_id, struct rte_eth_xstats *xstats,
 {
 	struct rte_eth_stats eth_stats;
 	struct rte_eth_dev *dev;
-	unsigned count, i, q;
+	unsigned count = 0, i, q;
+	signed xcount = 0;
 	uint64_t val, *stats_ptr;
 
 	VALID_PORTID_OR_ERR_RET(port_id, -EINVAL);
 
 	dev = &rte_eth_devices[port_id];
 
-	/* implemented by the driver */
-	if (dev->dev_ops->xstats_get != NULL)
-		return (*dev->dev_ops->xstats_get)(dev, xstats, n);
-
-	/* else, return generic statistics */
+	/* Return generic statistics */
 	count = RTE_NB_STATS;
 	count += dev->data->nb_rx_queues * RTE_NB_RXQ_STATS;
 	count += dev->data->nb_tx_queues * RTE_NB_TXQ_STATS;
-	if (n < count)
-		return count;
+
+	/* implemented by the driver */
+	if (dev->dev_ops->xstats_get != NULL) {
+		/* Retrieve the xstats from the driver at the end of the
+		 * xstats struct.
+		 */
+		xcount = (*dev->dev_ops->xstats_get)(dev, &xstats[count],
+			 (n > count) ? n - count : 0);
+
+		if (xcount < 0)
+			return xcount;
+	}
+
+	if (n < count + xcount)
+		return count + xcount;
 
 	/* now fill the xstats structure */
-
 	count = 0;
 	rte_eth_stats_get(port_id, &eth_stats);
 
@@ -1722,7 +1726,7 @@ rte_eth_xstats_get(uint8_t port_id, struct rte_eth_xstats *xstats,
 		}
 	}
 
-	return count;
+	return count + xcount;
 }
 
 /* reset ethdev extended statistics */
@@ -2542,6 +2546,27 @@ rte_eth_dev_mac_addr_remove(uint8_t port_id, struct ether_addr *addr)
 }
 
 int
+rte_eth_dev_default_mac_addr_set(uint8_t port_id, struct ether_addr *addr)
+{
+	struct rte_eth_dev *dev;
+
+	VALID_PORTID_OR_ERR_RET(port_id, -ENODEV);
+
+	if (!is_valid_assigned_ether_addr(addr))
+		return -EINVAL;
+
+	dev = &rte_eth_devices[port_id];
+	FUNC_PTR_OR_ERR_RET(*dev->dev_ops->mac_addr_set, -ENOTSUP);
+
+	/* Update default address in NIC data structure */
+	ether_addr_copy(addr, &dev->data->mac_addrs[0]);
+
+	(*dev->dev_ops->mac_addr_set)(dev, addr);
+
+	return 0;
+}
+
+int
 rte_eth_dev_set_vf_rxmode(uint8_t port_id,  uint16_t vf,
 				uint16_t rx_mode, uint8_t on)
 {
@@ -2929,9 +2954,10 @@ rte_eth_dev_callback_register(uint8_t port_id,
 	}
 
 	/* create a new callback. */
-	if (user_cb == NULL &&
-	    (user_cb = rte_zmalloc("INTR_USER_CALLBACK",
-				   sizeof(struct rte_eth_dev_callback), 0))) {
+	if (user_cb == NULL)
+		user_cb = rte_zmalloc("INTR_USER_CALLBACK",
+		                      sizeof(struct rte_eth_dev_callback), 0);
+	if (user_cb != NULL) {
 		user_cb->cb_fn = cb_fn;
 		user_cb->cb_arg = cb_arg;
 		user_cb->event = event;
@@ -3376,4 +3402,64 @@ rte_eth_timesync_read_tx_timestamp(uint8_t port_id, struct timespec *timestamp)
 
 	FUNC_PTR_OR_ERR_RET(*dev->dev_ops->timesync_read_tx_timestamp, -ENOTSUP);
 	return (*dev->dev_ops->timesync_read_tx_timestamp)(dev, timestamp);
+}
+
+int
+rte_eth_dev_get_reg_length(uint8_t port_id)
+{
+	struct rte_eth_dev *dev;
+
+	VALID_PORTID_OR_ERR_RET(port_id, -ENODEV);
+
+	dev = &rte_eth_devices[port_id];
+	FUNC_PTR_OR_ERR_RET(*dev->dev_ops->get_reg_length, -ENOTSUP);
+	return (*dev->dev_ops->get_reg_length)(dev);
+}
+
+int
+rte_eth_dev_get_reg_info(uint8_t port_id, struct rte_dev_reg_info *info)
+{
+	struct rte_eth_dev *dev;
+
+	VALID_PORTID_OR_ERR_RET(port_id, -ENODEV);
+
+	dev = &rte_eth_devices[port_id];
+	FUNC_PTR_OR_ERR_RET(*dev->dev_ops->get_reg, -ENOTSUP);
+	return (*dev->dev_ops->get_reg)(dev, info);
+}
+
+int
+rte_eth_dev_get_eeprom_length(uint8_t port_id)
+{
+	struct rte_eth_dev *dev;
+
+	VALID_PORTID_OR_ERR_RET(port_id, -ENODEV);
+
+	dev = &rte_eth_devices[port_id];
+	FUNC_PTR_OR_ERR_RET(*dev->dev_ops->get_eeprom_length, -ENOTSUP);
+	return (*dev->dev_ops->get_eeprom_length)(dev);
+}
+
+int
+rte_eth_dev_get_eeprom(uint8_t port_id, struct rte_dev_eeprom_info *info)
+{
+	struct rte_eth_dev *dev;
+
+	VALID_PORTID_OR_ERR_RET(port_id, -ENODEV);
+
+	dev = &rte_eth_devices[port_id];
+	FUNC_PTR_OR_ERR_RET(*dev->dev_ops->get_eeprom, -ENOTSUP);
+	return (*dev->dev_ops->get_eeprom)(dev, info);
+}
+
+int
+rte_eth_dev_set_eeprom(uint8_t port_id, struct rte_dev_eeprom_info *info)
+{
+	struct rte_eth_dev *dev;
+
+	VALID_PORTID_OR_ERR_RET(port_id, -ENODEV);
+
+	dev = &rte_eth_devices[port_id];
+	FUNC_PTR_OR_ERR_RET(*dev->dev_ops->set_eeprom, -ENOTSUP);
+	return (*dev->dev_ops->set_eeprom)(dev, info);
 }

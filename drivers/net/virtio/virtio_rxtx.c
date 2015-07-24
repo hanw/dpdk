@@ -390,7 +390,7 @@ virtio_dev_rx_queue_setup(struct rte_eth_dev *dev,
 	ret = virtio_dev_queue_setup(dev, VTNET_RQ, queue_idx, vtpci_queue_idx,
 			nb_desc, socket_id, &vq);
 	if (ret < 0) {
-		PMD_INIT_LOG(ERR, "tvq initialization failed");
+		PMD_INIT_LOG(ERR, "rvq initialization failed");
 		return ret;
 	}
 
@@ -399,6 +399,12 @@ virtio_dev_rx_queue_setup(struct rte_eth_dev *dev,
 
 	dev->data->rx_queues[queue_idx] = vq;
 	return 0;
+}
+
+void
+virtio_dev_rx_queue_release(void *rxq)
+{
+	virtio_dev_queue_release(rxq);
 }
 
 /*
@@ -453,6 +459,12 @@ virtio_dev_tx_queue_setup(struct rte_eth_dev *dev,
 
 	dev->data->tx_queues[queue_idx] = vq;
 	return 0;
+}
+
+void
+virtio_dev_tx_queue_release(void *txq)
+{
+	virtio_dev_queue_release(txq);
 }
 
 static void

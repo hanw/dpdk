@@ -114,6 +114,7 @@
 #define I40E_PRTTSYN_TSYNTYPE 0x0e000000
 
 static int eth_i40e_dev_init(struct rte_eth_dev *eth_dev);
+static int eth_i40e_dev_uninit(struct rte_eth_dev *eth_dev);
 static int i40e_dev_configure(struct rte_eth_dev *dev);
 static int i40e_dev_start(struct rte_eth_dev *dev);
 static void i40e_dev_stop(struct rte_eth_dev *dev);
@@ -294,19 +295,13 @@ static struct eth_driver rte_i40e_pmd = {
 	.pci_drv = {
 		.name = "rte_i40e_pmd",
 		.id_table = pci_id_i40e_map,
-		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_INTR_LSC,
+		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_INTR_LSC |
+			RTE_PCI_DRV_DETACHABLE,
 	},
 	.eth_dev_init = eth_i40e_dev_init,
+	.eth_dev_uninit = eth_i40e_dev_uninit,
 	.dev_private_size = sizeof(struct i40e_adapter),
 };
-
-static inline int
-i40e_align_floor(int n)
-{
-	if (n == 0)
-		return 0;
-	return (1 << (sizeof(n) * CHAR_BIT - 1 - __builtin_clz(n)));
-}
 
 static inline int
 rte_i40e_dev_atomic_read_link_status(struct rte_eth_dev *dev,
@@ -431,6 +426,7 @@ eth_i40e_dev_init(struct rte_eth_dev *dev)
 	hw->subsystem_device_id = pci_dev->id.subsystem_device_id;
 	hw->bus.device = pci_dev->addr.devid;
 	hw->bus.func = pci_dev->addr.function;
+	hw->adapter_stopped = 0;
 
 	/* Make sure all is clean before doing PF reset */
 	i40e_clear_hw(hw);
@@ -610,6 +606,65 @@ err_get_capabilities:
 	(void)i40e_shutdown_adminq(hw);
 
 	return ret;
+}
+
+static int
+eth_i40e_dev_uninit(struct rte_eth_dev *dev)
+{
+	struct rte_pci_device *pci_dev;
+	struct i40e_hw *hw;
+	struct i40e_filter_control_settings settings;
+	int ret;
+	uint8_t aq_fail = 0;
+
+	PMD_INIT_FUNC_TRACE();
+
+	if (rte_eal_process_type() != RTE_PROC_PRIMARY)
+		return 0;
+
+	hw = I40E_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	pci_dev = dev->pci_dev;
+
+	if (hw->adapter_stopped == 0)
+		i40e_dev_close(dev);
+
+	dev->dev_ops = NULL;
+	dev->rx_pkt_burst = NULL;
+	dev->tx_pkt_burst = NULL;
+
+	/* Disable LLDP */
+	ret = i40e_aq_stop_lldp(hw, true, NULL);
+	if (ret != I40E_SUCCESS) /* Its failure can be ignored */
+		PMD_INIT_LOG(INFO, "Failed to stop lldp");
+
+	/* Clear PXE mode */
+	i40e_clear_pxe_mode(hw);
+
+	/* Unconfigure filter control */
+	memset(&settings, 0, sizeof(settings));
+	ret = i40e_set_filter_control(hw, &settings);
+	if (ret)
+		PMD_INIT_LOG(WARNING, "setup_pf_filter_control failed: %d",
+					ret);
+
+	/* Disable flow control */
+	hw->fc.requested_mode = I40E_FC_NONE;
+	i40e_set_fc(hw, &aq_fail, TRUE);
+
+	/* uninitialize pf host driver */
+	i40e_pf_host_uninit(dev);
+
+	rte_free(dev->data->mac_addrs);
+	dev->data->mac_addrs = NULL;
+
+	/* disable uio intr before callback unregister */
+	rte_intr_disable(&(pci_dev->intr_handle));
+
+	/* register callback func to eal lib */
+	rte_intr_callback_unregister(&(pci_dev->intr_handle),
+		i40e_dev_interrupt_handler, (void *)dev);
+
+	return 0;
 }
 
 static int
@@ -887,6 +942,8 @@ i40e_dev_start(struct rte_eth_dev *dev)
 	struct i40e_vsi *main_vsi = pf->main_vsi;
 	int ret, i;
 
+	hw->adapter_stopped = 0;
+
 	if ((dev->data->dev_conf.link_duplex != ETH_LINK_AUTONEG_DUPLEX) &&
 		(dev->data->dev_conf.link_duplex != ETH_LINK_FULL_DUPLEX)) {
 		PMD_INIT_LOG(ERR, "Invalid link_duplex (%hu) for port %hhu",
@@ -998,10 +1055,13 @@ i40e_dev_close(struct rte_eth_dev *dev)
 	struct i40e_pf *pf = I40E_DEV_PRIVATE_TO_PF(dev->data->dev_private);
 	struct i40e_hw *hw = I40E_DEV_PRIVATE_TO_HW(dev->data->dev_private);
 	uint32_t reg;
+	int i;
 
 	PMD_INIT_FUNC_TRACE();
 
 	i40e_dev_stop(dev);
+	hw->adapter_stopped = 1;
+	i40e_dev_free_queues(dev);
 
 	/* Disable interrupt */
 	i40e_pf_disable_irq0(hw);
@@ -1013,6 +1073,14 @@ i40e_dev_close(struct rte_eth_dev *dev)
 	/* release all the existing VSIs and VEBs */
 	i40e_fdir_teardown(pf);
 	i40e_vsi_release(pf->main_vsi);
+
+	for (i = 0; i < pf->nb_cfg_vmdq_vsi; i++) {
+		i40e_vsi_release(pf->vmdq[i].vsi);
+		pf->vmdq[i].vsi = NULL;
+	}
+
+	rte_free(pf->vmdq);
+	pf->vmdq = NULL;
 
 	/* shutdown the adminq */
 	i40e_aq_queue_shutdown(hw, true);

@@ -1,7 +1,7 @@
 /*-
  *   BSD LICENSE
  *
- *   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
+ *   Copyright(c) 2015 Intel Corporation. All rights reserved.
  *   All rights reserved.
  *
  *   Redistribution and use in source and binary forms, with or without
@@ -31,62 +31,27 @@
  *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <stdio.h>
-#include <string.h>
-#include <stdint.h>
-#include <errno.h>
-#include <stdarg.h>
-#include <inttypes.h>
-#include <sys/queue.h>
-#include <stdlib.h>
+#ifndef _RTE_DEV_INFO_H_
+#define _RTE_DEV_INFO_H_
 
-#include <rte_memory.h>
-#include <rte_memzone.h>
-#include <rte_launch.h>
-#include <rte_tailq.h>
-#include <rte_eal.h>
-#include <rte_per_lcore.h>
-#include <rte_lcore.h>
-#include <rte_debug.h>
-#include <rte_log.h>
-#include <rte_atomic.h>
-#include <rte_branch_prediction.h>
-#include <rte_string_fns.h>
+/*
+ * Placeholder for accessing device registers
+ */
+struct rte_dev_reg_info {
+	void *data; /**< Buffer for return registers */
+	uint32_t offset; /**< Start register table location for access */
+	uint32_t length; /**< Number of registers to fetch */
+	uint32_t version; /**< Device version */
+};
 
-int
-main(int argc, char **argv)
-{
-	int ret;
-	int i;
-	char c_flag[] = "-c1";
-	char n_flag[] = "-n4";
-	char mp_flag[] = "--proc-type=secondary";
-	char *argp[argc + 3];
-	argp[0] = argv[0];
-	argp[1] = c_flag;
-	argp[2] = n_flag;
-	argp[3] = mp_flag;
+/*
+ * Placeholder for accessing device eeprom
+ */
+struct rte_dev_eeprom_info {
+	void *data; /**< Buffer for return eeprom */
+	uint32_t offset; /**< Start eeprom address for access*/
+	uint32_t length; /**< Length of eeprom region to access */
+	uint32_t magic; /**< Device-specific key, such as device-id */
+};
 
-	for(i = 1; i < argc; i++) {
-		argp[i + 3] = argv[i];
-	}
-	argc += 3;
-
-	ret = rte_eal_init(argc, argp);
-	if (ret < 0)
-		rte_panic("Cannot init EAL\n");
-
-	printf("----------- MEMORY_SEGMENTS -----------\n");
-	rte_dump_physmem_layout(stdout);
-	printf("--------- END_MEMORY_SEGMENTS ---------\n");
-
-	printf("------------ MEMORY_ZONES -------------\n");
-	rte_memzone_dump(stdout);
-	printf("---------- END_MEMORY_ZONES -----------\n");
-
-	printf("------------- TAIL_QUEUES -------------\n");
-	rte_dump_tailq(stdout);
-	printf("---------- END_TAIL_QUEUES ------------\n");
-
-	return 0;
-}
+#endif /* _RTE_DEV_INFO_H_ */

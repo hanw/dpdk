@@ -313,6 +313,8 @@ struct ixgbe_adapter {
  */
 void ixgbe_dev_clear_queues(struct rte_eth_dev *dev);
 
+void ixgbe_dev_free_queues(struct rte_eth_dev *dev);
+
 void ixgbe_dev_rx_queue_release(void *rxq);
 
 void ixgbe_dev_tx_queue_release(void *txq);
@@ -390,6 +392,8 @@ void ixgbe_vlan_hw_strip_enable_all(struct rte_eth_dev *dev);
 void ixgbe_vlan_hw_strip_disable_all(struct rte_eth_dev *dev);
 
 void ixgbe_pf_host_init(struct rte_eth_dev *eth_dev);
+
+void ixgbe_pf_host_uninit(struct rte_eth_dev *eth_dev);
 
 void ixgbe_pf_mbx_process(struct rte_eth_dev *eth_dev);
 

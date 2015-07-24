@@ -65,6 +65,8 @@ static void
 fm10k_MAC_filter_set(struct rte_eth_dev *dev, const u8 *mac, bool add);
 static void
 fm10k_MACVLAN_remove_all(struct rte_eth_dev *dev);
+static void fm10k_tx_queue_release(void *queue);
+static void fm10k_rx_queue_release(void *queue);
 
 static void
 fm10k_mbx_initlock(struct fm10k_hw *hw)
@@ -804,11 +806,31 @@ fm10k_dev_stop(struct rte_eth_dev *dev)
 
 	PMD_INIT_FUNC_TRACE();
 
-	for (i = 0; i < dev->data->nb_tx_queues; i++)
-		fm10k_dev_tx_queue_stop(dev, i);
+	if (dev->data->tx_queues)
+		for (i = 0; i < dev->data->nb_tx_queues; i++)
+			fm10k_dev_tx_queue_stop(dev, i);
 
-	for (i = 0; i < dev->data->nb_rx_queues; i++)
-		fm10k_dev_rx_queue_stop(dev, i);
+	if (dev->data->rx_queues)
+		for (i = 0; i < dev->data->nb_rx_queues; i++)
+			fm10k_dev_rx_queue_stop(dev, i);
+}
+
+static void
+fm10k_dev_queue_release(struct rte_eth_dev *dev)
+{
+	int i;
+
+	PMD_INIT_FUNC_TRACE();
+
+	if (dev->data->tx_queues) {
+		for (i = 0; i < dev->data->nb_tx_queues; i++)
+			fm10k_tx_queue_release(dev->data->tx_queues[i]);
+	}
+
+	if (dev->data->rx_queues) {
+		for (i = 0; i < dev->data->nb_rx_queues; i++)
+			fm10k_rx_queue_release(dev->data->rx_queues[i]);
+	}
 }
 
 static void
@@ -823,6 +845,7 @@ fm10k_dev_close(struct rte_eth_dev *dev)
 	/* Stop mailbox service first */
 	fm10k_close_mbx_service(hw);
 	fm10k_dev_stop(dev);
+	fm10k_dev_queue_release(dev);
 	fm10k_stop_hw(hw);
 }
 
@@ -1685,6 +1708,36 @@ fm10k_dev_enable_intr_pf(struct rte_eth_dev *dev)
 }
 
 static void
+fm10k_dev_disable_intr_pf(struct rte_eth_dev *dev)
+{
+	struct fm10k_hw *hw = FM10K_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	uint32_t int_map = FM10K_INT_MAP_DISABLE;
+
+	int_map |= 0;
+
+	FM10K_WRITE_REG(hw, FM10K_INT_MAP(fm10k_int_Mailbox), int_map);
+	FM10K_WRITE_REG(hw, FM10K_INT_MAP(fm10k_int_PCIeFault), int_map);
+	FM10K_WRITE_REG(hw, FM10K_INT_MAP(fm10k_int_SwitchUpDown), int_map);
+	FM10K_WRITE_REG(hw, FM10K_INT_MAP(fm10k_int_SwitchEvent), int_map);
+	FM10K_WRITE_REG(hw, FM10K_INT_MAP(fm10k_int_SRAM), int_map);
+	FM10K_WRITE_REG(hw, FM10K_INT_MAP(fm10k_int_VFLR), int_map);
+
+	/* Disable misc causes */
+	FM10K_WRITE_REG(hw, FM10K_EIMR, FM10K_EIMR_DISABLE(PCA_FAULT) |
+				FM10K_EIMR_DISABLE(THI_FAULT) |
+				FM10K_EIMR_DISABLE(FUM_FAULT) |
+				FM10K_EIMR_DISABLE(MAILBOX) |
+				FM10K_EIMR_DISABLE(SWITCHREADY) |
+				FM10K_EIMR_DISABLE(SWITCHNOTREADY) |
+				FM10K_EIMR_DISABLE(SRAMERROR) |
+				FM10K_EIMR_DISABLE(VFLR));
+
+	/* Disable ITR 0 */
+	FM10K_WRITE_REG(hw, FM10K_ITR(0), FM10K_ITR_MASK_SET);
+	FM10K_WRITE_FLUSH(hw);
+}
+
+static void
 fm10k_dev_enable_intr_vf(struct rte_eth_dev *dev)
 {
 	struct fm10k_hw *hw = FM10K_DEV_PRIVATE_TO_HW(dev->data->dev_private);
@@ -1702,6 +1755,22 @@ fm10k_dev_enable_intr_vf(struct rte_eth_dev *dev)
 	FM10K_WRITE_FLUSH(hw);
 }
 
+static void
+fm10k_dev_disable_intr_vf(struct rte_eth_dev *dev)
+{
+	struct fm10k_hw *hw = FM10K_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	uint32_t int_map = FM10K_INT_MAP_DISABLE;
+
+	int_map |= 0;
+
+	/* Only INT 0 available, other 15 are reserved. */
+	FM10K_WRITE_REG(hw, FM10K_VFINT_MAP, int_map);
+
+	/* Disable ITR 0 */
+	FM10K_WRITE_REG(hw, FM10K_VFITR(0), FM10K_ITR_MASK_SET);
+	FM10K_WRITE_FLUSH(hw);
+}
+
 static int
 fm10k_dev_handle_fault(struct fm10k_hw *hw, uint32_t eicr)
 {
@@ -1710,7 +1779,7 @@ fm10k_dev_handle_fault(struct fm10k_hw *hw, uint32_t eicr)
 	const char *estr = "Unknown error";
 
 	/* Process PCA fault */
-	if (eicr & FM10K_EIMR_PCA_FAULT) {
+	if (eicr & FM10K_EICR_PCA_FAULT) {
 		err = fm10k_get_fault(hw, FM10K_PCA_FAULT, &fault);
 		if (err)
 			goto error;
@@ -1738,7 +1807,7 @@ fm10k_dev_handle_fault(struct fm10k_hw *hw, uint32_t eicr)
 	}
 
 	/* Process THI fault */
-	if (eicr & FM10K_EIMR_THI_FAULT) {
+	if (eicr & FM10K_EICR_THI_FAULT) {
 		err = fm10k_get_fault(hw, FM10K_THI_FAULT, &fault);
 		if (err)
 			goto error;
@@ -1756,7 +1825,7 @@ fm10k_dev_handle_fault(struct fm10k_hw *hw, uint32_t eicr)
 	}
 
 	/* Process FUM fault */
-	if (eicr & FM10K_EIMR_FUM_FAULT) {
+	if (eicr & FM10K_EICR_FUM_FAULT) {
 		err = fm10k_get_fault(hw, FM10K_FUM_FAULT, &fault);
 		if (err)
 			goto error;
@@ -1793,8 +1862,6 @@ fm10k_dev_handle_fault(struct fm10k_hw *hw, uint32_t eicr)
 			fault.address, fault.specinfo);
 	}
 
-	if (estr)
-		return 0;
 	return 0;
 error:
 	PMD_INIT_LOG(ERR, "Failed to handle fault event.");
@@ -2154,6 +2221,54 @@ eth_fm10k_dev_init(struct rte_eth_dev *dev)
 	return 0;
 }
 
+static int
+eth_fm10k_dev_uninit(struct rte_eth_dev *dev)
+{
+	struct fm10k_hw *hw = FM10K_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+
+	PMD_INIT_FUNC_TRACE();
+
+	/* only uninitialize in the primary process */
+	if (rte_eal_process_type() != RTE_PROC_PRIMARY)
+		return 0;
+
+	/* safe to close dev here */
+	fm10k_dev_close(dev);
+
+	dev->dev_ops = NULL;
+	dev->rx_pkt_burst = NULL;
+	dev->tx_pkt_burst = NULL;
+
+	/* disable uio/vfio intr */
+	rte_intr_disable(&(dev->pci_dev->intr_handle));
+
+	/*PF/VF has different interrupt handling mechanism */
+	if (hw->mac.type == fm10k_mac_pf) {
+		/* disable interrupt */
+		fm10k_dev_disable_intr_pf(dev);
+
+		/* unregister callback func to eal lib */
+		rte_intr_callback_unregister(&(dev->pci_dev->intr_handle),
+			fm10k_dev_interrupt_handler_pf, (void *)dev);
+	} else {
+		/* disable interrupt */
+		fm10k_dev_disable_intr_vf(dev);
+
+		rte_intr_callback_unregister(&(dev->pci_dev->intr_handle),
+			fm10k_dev_interrupt_handler_vf, (void *)dev);
+	}
+
+	/* free mac memory */
+	if (dev->data->mac_addrs) {
+		rte_free(dev->data->mac_addrs);
+		dev->data->mac_addrs = NULL;
+	}
+
+	memset(hw, 0, sizeof(*hw));
+
+	return 0;
+}
+
 /*
  * The set of PCI devices this driver supports. This driver will enable both PF
  * and SRIOV-VF devices.
@@ -2169,9 +2284,10 @@ static struct eth_driver rte_pmd_fm10k = {
 	.pci_drv = {
 		.name = "rte_pmd_fm10k",
 		.id_table = pci_id_fm10k_map,
-		.drv_flags = RTE_PCI_DRV_NEED_MAPPING,
+		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_DETACHABLE,
 	},
 	.eth_dev_init = eth_fm10k_dev_init,
+	.eth_dev_uninit = eth_fm10k_dev_uninit,
 	.dev_private_size = sizeof(struct fm10k_adapter),
 };
 

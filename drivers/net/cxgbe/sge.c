@@ -31,7 +31,6 @@
  *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <linux/if_ether.h>
 #include <sys/queue.h>
 #include <stdio.h>
 #include <errno.h>
@@ -98,7 +97,8 @@ static inline unsigned int fl_mtu_bufsize(struct adapter *adapter,
 {
 	struct sge *s = &adapter->sge;
 
-	return ALIGN(s->pktshift + ETH_HLEN + VLAN_HLEN + mtu, s->fl_align);
+	return CXGBE_ALIGN(s->pktshift + ETHER_HDR_LEN + VLAN_HLEN + mtu,
+			   s->fl_align);
 }
 
 #define FL_MTU_SMALL_BUFSIZE(adapter) fl_mtu_bufsize(adapter, FL_MTU_SMALL)
@@ -1299,14 +1299,22 @@ int t4_ethrx_handler(struct sge_rspq *q, const __be64 *rsp,
 
 	mbuf->port = pkt->iff;
 	if (pkt->l2info & htonl(F_RXF_IP)) {
+#ifdef RTE_NEXT_ABI
+		mbuf->packet_type = RTE_PTYPE_L3_IPV4;
+#else
 		mbuf->ol_flags |= PKT_RX_IPV4_HDR;
+#endif
 		if (unlikely(!csum_ok))
 			mbuf->ol_flags |= PKT_RX_IP_CKSUM_BAD;
 
 		if ((pkt->l2info & htonl(F_RXF_UDP | F_RXF_TCP)) && !csum_ok)
 			mbuf->ol_flags |= PKT_RX_L4_CKSUM_BAD;
 	} else if (pkt->l2info & htonl(F_RXF_IP6)) {
+#ifdef RTE_NEXT_ABI
+		mbuf->packet_type = RTE_PTYPE_L3_IPV6;
+#else
 		mbuf->ol_flags |= PKT_RX_IPV6_HDR;
+#endif
 	}
 
 	mbuf->port = pkt->iff;
@@ -1411,7 +1419,11 @@ static int process_responses(struct sge_rspq *q, int budget,
 			unmap_rx_buf(&rxq->fl);
 
 			if (cpl->l2info & htonl(F_RXF_IP)) {
+#ifdef RTE_NEXT_ABI
+				pkt->packet_type = RTE_PTYPE_L3_IPV4;
+#else
 				pkt->ol_flags |= PKT_RX_IPV4_HDR;
+#endif
 				if (unlikely(!csum_ok))
 					pkt->ol_flags |= PKT_RX_IP_CKSUM_BAD;
 
@@ -1419,7 +1431,11 @@ static int process_responses(struct sge_rspq *q, int budget,
 				     htonl(F_RXF_UDP | F_RXF_TCP)) && !csum_ok)
 					pkt->ol_flags |= PKT_RX_L4_CKSUM_BAD;
 			} else if (cpl->l2info & htonl(F_RXF_IP6)) {
+#ifdef RTE_NEXT_ABI
+				pkt->packet_type = RTE_PTYPE_L3_IPV6;
+#else
 				pkt->ol_flags |= PKT_RX_IPV6_HDR;
+#endif
 			}
 
 			if (!rss_hdr->filter_tid && rss_hdr->hash_type) {
@@ -1562,7 +1578,7 @@ int t4_sge_alloc_rxq(struct adapter *adap, struct sge_rspq *iq, bool fwevtq,
 	unsigned int nb_refill;
 
 	/* Size needs to be multiple of 16, including status entry. */
-	iq->size = roundup(iq->size, 16);
+	iq->size = cxgbe_roundup(iq->size, 16);
 
 	snprintf(z_name, sizeof(z_name), "%s_%s_%d_%d",
 		 eth_dev->driver->pci_drv.name, fwevtq ? "fwq_ring" : "rx_ring",
@@ -1614,7 +1630,7 @@ int t4_sge_alloc_rxq(struct adapter *adap, struct sge_rspq *iq, bool fwevtq,
 		 */
 		if (fl->size < s->fl_starve_thres - 1 + 2 * 8)
 			fl->size = s->fl_starve_thres - 1 + 2 * 8;
-		fl->size = roundup(fl->size, 8);
+		fl->size = cxgbe_roundup(fl->size, 8);
 
 		snprintf(z_name, sizeof(z_name), "%s_%s_%d_%d",
 			 eth_dev->driver->pci_drv.name,
@@ -2048,7 +2064,7 @@ static int t4_sge_init_soft(struct adapter *adap)
 	 * The Page Size Buffer must be exactly equal to our Page Size and the
 	 * Large Page Size Buffer should be 0 (per above) or a power of 2.
 	 */
-	if (fl_small_pg != PAGE_SIZE ||
+	if (fl_small_pg != CXGBE_PAGE_SIZE ||
 	    (fl_large_pg & (fl_large_pg - 1)) != 0) {
 		dev_err(adap, "bad SGE FL page buffer sizes [%d, %d]\n",
 			fl_small_pg, fl_large_pg);

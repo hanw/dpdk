@@ -1,7 +1,7 @@
 /*-
  *   BSD LICENSE
  *
- *   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
+ *   Copyright(c) 2010-2015 Intel Corporation. All rights reserved.
  *   All rights reserved.
  *
  *   Redistribution and use in source and binary forms, with or without
@@ -51,6 +51,7 @@
 #include <rte_pci.h>
 #include <rte_ether.h>
 #include <rte_common.h>
+#include <rte_errno.h>
 
 #include <rte_memory.h>
 #include <rte_eal.h>
@@ -63,6 +64,7 @@
 
 
 static int eth_virtio_dev_init(struct rte_eth_dev *eth_dev);
+static int eth_virtio_dev_uninit(struct rte_eth_dev *eth_dev);
 static int  virtio_dev_configure(struct rte_eth_dev *dev);
 static int  virtio_dev_start(struct rte_eth_dev *dev);
 static void virtio_dev_stop(struct rte_eth_dev *dev);
@@ -77,9 +79,6 @@ static int virtio_dev_link_update(struct rte_eth_dev *dev,
 
 static void virtio_set_hwaddr(struct virtio_hw *hw);
 static void virtio_get_hwaddr(struct virtio_hw *hw);
-
-static void virtio_dev_rx_queue_release(__rte_unused void *rxq);
-static void virtio_dev_tx_queue_release(__rte_unused void *txq);
 
 static void virtio_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats);
 static void virtio_dev_stats_reset(struct rte_eth_dev *dev);
@@ -238,10 +237,24 @@ virtio_set_multiple_queues(struct rte_eth_dev *dev, uint16_t nb_queues)
 	return 0;
 }
 
+void
+virtio_dev_queue_release(struct virtqueue *vq) {
+	struct virtio_hw *hw = vq->hw;
+
+	if (vq) {
+		/* Select and deactivate the queue */
+		VIRTIO_WRITE_REG_2(hw, VIRTIO_PCI_QUEUE_SEL, vq->queue_id);
+		VIRTIO_WRITE_REG_4(hw, VIRTIO_PCI_QUEUE_PFN, 0);
+
+		rte_free(vq);
+		vq = NULL;
+	}
+}
+
 int virtio_dev_queue_setup(struct rte_eth_dev *dev,
 			int queue_type,
 			uint16_t queue_idx,
-			uint16_t  vtpci_queue_idx,
+			uint16_t vtpci_queue_idx,
 			uint16_t nb_desc,
 			unsigned int socket_id,
 			struct virtqueue **pvq)
@@ -251,7 +264,7 @@ int virtio_dev_queue_setup(struct rte_eth_dev *dev,
 	uint16_t vq_size;
 	int size;
 	struct virtio_hw *hw = dev->data->dev_private;
-	struct virtqueue  *vq = NULL;
+	struct virtqueue *vq = NULL;
 
 	/* Write the virtqueue index to the Queue Select Field */
 	VIRTIO_WRITE_REG_2(hw, VIRTIO_PCI_QUEUE_SEL, vtpci_queue_idx);
@@ -263,8 +276,6 @@ int virtio_dev_queue_setup(struct rte_eth_dev *dev,
 	 */
 	vq_size = VIRTIO_READ_REG_2(hw, VIRTIO_PCI_QUEUE_NUM);
 	PMD_INIT_LOG(DEBUG, "vq_size: %d nb_desc:%d", vq_size, nb_desc);
-	if (nb_desc == 0)
-		nb_desc = vq_size;
 	if (vq_size == 0) {
 		PMD_INIT_LOG(ERR, "%s: virtqueue does not exist", __func__);
 		return -EINVAL;
@@ -273,16 +284,6 @@ int virtio_dev_queue_setup(struct rte_eth_dev *dev,
 	if (!rte_is_power_of_2(vq_size)) {
 		PMD_INIT_LOG(ERR, "%s: virtqueue size is not powerof 2", __func__);
 		return -EINVAL;
-	}
-
-	if (nb_desc < vq_size) {
-		if (!rte_is_power_of_2(nb_desc)) {
-			PMD_INIT_LOG(ERR,
-				     "nb_desc(%u) size is not powerof 2",
-				     nb_desc);
-			return -EINVAL;
-		}
-		vq_size = nb_desc;
 	}
 
 	if (queue_type == VTNET_RQ) {
@@ -312,7 +313,10 @@ int virtio_dev_queue_setup(struct rte_eth_dev *dev,
 	vq->queue_id = queue_idx;
 	vq->vq_queue_index = vtpci_queue_idx;
 	vq->vq_nentries = vq_size;
-	vq->vq_free_cnt = vq_size;
+
+	if (nb_desc == 0 || nb_desc > vq_size)
+		nb_desc = vq_size;
+	vq->vq_free_cnt = nb_desc;
 
 	/*
 	 * Reserve a memzone for vring elements
@@ -324,8 +328,12 @@ int virtio_dev_queue_setup(struct rte_eth_dev *dev,
 	mz = rte_memzone_reserve_aligned(vq_name, vq->vq_ring_size,
 		socket_id, 0, VIRTIO_PCI_VRING_ALIGN);
 	if (mz == NULL) {
-		rte_free(vq);
-		return -ENOMEM;
+		if (rte_errno == EEXIST)
+			mz = rte_memzone_lookup(vq_name);
+		if (mz == NULL) {
+			rte_free(vq);
+			return -ENOMEM;
+		}
 	}
 
 	/*
@@ -358,8 +366,13 @@ int virtio_dev_queue_setup(struct rte_eth_dev *dev,
 			vq_size * hw->vtnet_hdr_size,
 			socket_id, 0, RTE_CACHE_LINE_SIZE);
 		if (vq->virtio_net_hdr_mz == NULL) {
-			rte_free(vq);
-			return -ENOMEM;
+			if (rte_errno == EEXIST)
+				vq->virtio_net_hdr_mz =
+					rte_memzone_lookup(vq_name);
+			if (vq->virtio_net_hdr_mz == NULL) {
+				rte_free(vq);
+				return -ENOMEM;
+			}
 		}
 		vq->virtio_net_hdr_mem =
 			vq->virtio_net_hdr_mz->phys_addr;
@@ -372,8 +385,13 @@ int virtio_dev_queue_setup(struct rte_eth_dev *dev,
 		vq->virtio_net_hdr_mz = rte_memzone_reserve_aligned(vq_name,
 			PAGE_SIZE, socket_id, 0, RTE_CACHE_LINE_SIZE);
 		if (vq->virtio_net_hdr_mz == NULL) {
-			rte_free(vq);
-			return -ENOMEM;
+			if (rte_errno == EEXIST)
+				vq->virtio_net_hdr_mz =
+					rte_memzone_lookup(vq_name);
+			if (vq->virtio_net_hdr_mz == NULL) {
+				rte_free(vq);
+				return -ENOMEM;
+			}
 		}
 		vq->virtio_net_hdr_mem =
 			vq->virtio_net_hdr_mz->phys_addr;
@@ -395,13 +413,12 @@ virtio_dev_cq_queue_setup(struct rte_eth_dev *dev, uint16_t vtpci_queue_idx,
 		uint32_t socket_id)
 {
 	struct virtqueue *vq;
-	uint16_t nb_desc = 0;
 	int ret;
 	struct virtio_hw *hw = dev->data->dev_private;
 
 	PMD_INIT_FUNC_TRACE();
 	ret = virtio_dev_queue_setup(dev, VTNET_CQ, VTNET_SQ_CQ_QUEUE_IDX,
-			vtpci_queue_idx, nb_desc, socket_id, &vq);
+			vtpci_queue_idx, 0, socket_id, &vq);
 	if (ret < 0) {
 		PMD_INIT_LOG(ERR, "control vq initialization failed");
 		return ret;
@@ -409,6 +426,22 @@ virtio_dev_cq_queue_setup(struct rte_eth_dev *dev, uint16_t vtpci_queue_idx,
 
 	hw->cvq = vq;
 	return 0;
+}
+
+static void
+virtio_free_queues(struct rte_eth_dev *dev)
+{
+	unsigned int i;
+
+	for (i = 0; i < dev->data->nb_rx_queues; i++)
+		virtio_dev_rx_queue_release(dev->data->rx_queues[i]);
+
+	dev->data->nb_rx_queues = 0;
+
+	for (i = 0; i < dev->data->nb_tx_queues; i++)
+		virtio_dev_tx_queue_release(dev->data->tx_queues[i]);
+
+	dev->data->nb_tx_queues = 0;
 }
 
 static void
@@ -425,6 +458,7 @@ virtio_dev_close(struct rte_eth_dev *dev)
 	vtpci_reset(hw);
 	hw->started = 0;
 	virtio_dev_free_mbufs(dev);
+	virtio_free_queues(dev);
 }
 
 static void
@@ -537,10 +571,8 @@ static const struct eth_dev_ops virtio_eth_dev_ops = {
 	.stats_reset             = virtio_dev_stats_reset,
 	.link_update             = virtio_dev_link_update,
 	.rx_queue_setup          = virtio_dev_rx_queue_setup,
-	/* meaningfull only to multiple queue */
 	.rx_queue_release        = virtio_dev_rx_queue_release,
 	.tx_queue_setup          = virtio_dev_tx_queue_setup,
-	/* meaningfull only to multiple queue */
 	.tx_queue_release        = virtio_dev_tx_queue_release,
 	/* collect stats per queue */
 	.queue_stats_mapping_set = virtio_dev_queue_stats_mapping_set,
@@ -1250,12 +1282,51 @@ eth_virtio_dev_init(struct rte_eth_dev *eth_dev)
 	return 0;
 }
 
+static int
+eth_virtio_dev_uninit(struct rte_eth_dev *eth_dev)
+{
+	struct rte_pci_device *pci_dev;
+	struct virtio_hw *hw = eth_dev->data->dev_private;
+
+	PMD_INIT_FUNC_TRACE();
+
+	if (rte_eal_process_type() == RTE_PROC_SECONDARY)
+		return -EPERM;
+
+	if (hw->started == 1) {
+		virtio_dev_stop(eth_dev);
+		virtio_dev_close(eth_dev);
+	}
+	pci_dev = eth_dev->pci_dev;
+
+	eth_dev->dev_ops = NULL;
+	eth_dev->tx_pkt_burst = NULL;
+	eth_dev->rx_pkt_burst = NULL;
+
+	virtio_dev_queue_release(hw->cvq);
+
+	rte_free(eth_dev->data->mac_addrs);
+	eth_dev->data->mac_addrs = NULL;
+
+	/* reset interrupt callback  */
+	if (pci_dev->driver->drv_flags & RTE_PCI_DRV_INTR_LSC)
+		rte_intr_callback_unregister(&pci_dev->intr_handle,
+						virtio_interrupt_handler,
+						eth_dev);
+
+	PMD_INIT_LOG(DEBUG, "dev_uninit completed");
+
+	return 0;
+}
+
 static struct eth_driver rte_virtio_pmd = {
 	.pci_drv = {
 		.name = "rte_virtio_pmd",
 		.id_table = pci_id_virtio_map,
+		.drv_flags = RTE_PCI_DRV_DETACHABLE,
 	},
 	.eth_dev_init = eth_virtio_dev_init,
+	.eth_dev_uninit = eth_virtio_dev_uninit,
 	.dev_private_size = sizeof(struct virtio_hw),
 };
 
@@ -1276,19 +1347,6 @@ rte_virtio_pmd_init(const char *name __rte_unused,
 
 	rte_eth_driver_register(&rte_virtio_pmd);
 	return 0;
-}
-
-/*
- * Only 1 queue is supported, no queue release related operation
- */
-static void
-virtio_dev_rx_queue_release(__rte_unused void *rxq)
-{
-}
-
-static void
-virtio_dev_tx_queue_release(__rte_unused void *txq)
-{
 }
 
 /*
@@ -1398,6 +1456,8 @@ static void virtio_dev_free_mbufs(struct rte_eth_dev *dev)
 			     "Before freeing rxq[%d] used and unused buf", i);
 		VIRTQUEUE_DUMP((struct virtqueue *)dev->data->rx_queues[i]);
 
+		PMD_INIT_LOG(DEBUG, "rx_queues[%d]=%p",
+				i, dev->data->rx_queues[i]);
 		while ((buf = (struct rte_mbuf *)virtqueue_detatch_unused(
 					dev->data->rx_queues[i])) != NULL) {
 			rte_pktmbuf_free(buf);

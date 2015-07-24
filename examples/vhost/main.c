@@ -2871,6 +2871,16 @@ setup_mempool_tbl(int socket, uint32_t index, char *pool_name,
 	}
 }
 
+/* When we receive a INT signal, unregister vhost driver */
+static void
+sigint_handler(__rte_unused int signum)
+{
+	/* Unregister vhost driver. */
+	int ret = rte_vhost_driver_unregister((char *)&dev_basename);
+	if (ret != 0)
+		rte_exit(EXIT_FAILURE, "vhost driver unregister failure.\n");
+	exit(0);
+}
 
 /*
  * Main function, does initialisation and calls the per-lcore functions. The CUSE
@@ -2886,6 +2896,8 @@ main(int argc, char *argv[])
 	uint8_t portid;
 	uint16_t queue_id;
 	static pthread_t tid;
+
+	signal(SIGINT, sigint_handler);
 
 	/* init EAL */
 	ret = rte_eal_init(argc, argv);
@@ -3051,10 +3063,10 @@ main(int argc, char *argv[])
 	if (mergeable == 0)
 		rte_vhost_feature_disable(1ULL << VIRTIO_NET_F_MRG_RXBUF);
 
-	/* Register CUSE device to handle IOCTLs. */
+	/* Register vhost(cuse or user) driver to handle vhost messages. */
 	ret = rte_vhost_driver_register((char *)&dev_basename);
 	if (ret != 0)
-		rte_exit(EXIT_FAILURE,"CUSE device setup failure.\n");
+		rte_exit(EXIT_FAILURE, "vhost driver register failure.\n");
 
 	rte_vhost_driver_callback_register(&virtio_net_device_ops);
 

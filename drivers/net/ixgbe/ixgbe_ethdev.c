@@ -68,6 +68,9 @@
 #include "ixgbe_ethdev.h"
 #include "ixgbe_bypass.h"
 #include "ixgbe_rxtx.h"
+#include "base/ixgbe_type.h"
+#include "base/ixgbe_phy.h"
+#include "ixgbe_regs.h"
 
 /*
  * High threshold controlling when to start sending XOFF frames. Must be at
@@ -91,6 +94,7 @@
 
 #define IXGBE_MMW_SIZE_DEFAULT        0x4
 #define IXGBE_MMW_SIZE_JUMBO_FRAME    0x14
+#define IXGBE_MAX_RING_DESC           4096 /* replicate define from rxtx */
 
 /*
  *  Default values for RX/TX configuration
@@ -125,6 +129,7 @@
 				  | IXGBE_TIMINCA_INCVALUE)
 
 static int eth_ixgbe_dev_init(struct rte_eth_dev *eth_dev);
+static int eth_ixgbe_dev_uninit(struct rte_eth_dev *eth_dev);
 static int  ixgbe_dev_configure(struct rte_eth_dev *dev);
 static int  ixgbe_dev_start(struct rte_eth_dev *dev);
 static void ixgbe_dev_stop(struct rte_eth_dev *dev);
@@ -139,7 +144,10 @@ static int ixgbe_dev_link_update(struct rte_eth_dev *dev,
 				int wait_to_complete);
 static void ixgbe_dev_stats_get(struct rte_eth_dev *dev,
 				struct rte_eth_stats *stats);
+static int ixgbe_dev_xstats_get(struct rte_eth_dev *dev,
+				struct rte_eth_xstats *xstats, unsigned n);
 static void ixgbe_dev_stats_reset(struct rte_eth_dev *dev);
+static void ixgbe_dev_xstats_reset(struct rte_eth_dev *dev);
 static int ixgbe_dev_queue_stats_mapping_set(struct rte_eth_dev *eth_dev,
 					     uint16_t queue_id,
 					     uint8_t stat_idx,
@@ -187,10 +195,13 @@ static void ixgbe_dev_interrupt_delayed_handler(void *param);
 static void ixgbe_add_rar(struct rte_eth_dev *dev, struct ether_addr *mac_addr,
 		uint32_t index, uint32_t pool);
 static void ixgbe_remove_rar(struct rte_eth_dev *dev, uint32_t index);
+static void ixgbe_set_default_mac_addr(struct rte_eth_dev *dev,
+					   struct ether_addr *mac_addr);
 static void ixgbe_dcb_init(struct ixgbe_hw *hw,struct ixgbe_dcb_config *dcb_config);
 
 /* For Virtual Function support */
 static int eth_ixgbevf_dev_init(struct rte_eth_dev *eth_dev);
+static int eth_ixgbevf_dev_uninit(struct rte_eth_dev *eth_dev);
 static int  ixgbevf_dev_configure(struct rte_eth_dev *dev);
 static int  ixgbevf_dev_start(struct rte_eth_dev *dev);
 static void ixgbevf_dev_stop(struct rte_eth_dev *dev);
@@ -231,6 +242,8 @@ static void ixgbevf_add_mac_addr(struct rte_eth_dev *dev,
 				 struct ether_addr *mac_addr,
 				 uint32_t index, uint32_t pool);
 static void ixgbevf_remove_mac_addr(struct rte_eth_dev *dev, uint32_t index);
+static void ixgbevf_set_default_mac_addr(struct rte_eth_dev *dev,
+					     struct ether_addr *mac_addr);
 static int ixgbe_syn_filter_set(struct rte_eth_dev *dev,
 			struct rte_eth_syn_filter *filter,
 			bool add);
@@ -268,6 +281,19 @@ static int ixgbevf_dev_set_mtu(struct rte_eth_dev *dev, uint16_t mtu);
 static int ixgbe_dev_set_mc_addr_list(struct rte_eth_dev *dev,
 				      struct ether_addr *mc_addr_set,
 				      uint32_t nb_mc_addr);
+
+static int ixgbe_get_reg_length(struct rte_eth_dev *dev);
+static int ixgbe_get_regs(struct rte_eth_dev *dev,
+			    struct rte_dev_reg_info *regs);
+static int ixgbe_get_eeprom_length(struct rte_eth_dev *dev);
+static int ixgbe_get_eeprom(struct rte_eth_dev *dev,
+				struct rte_dev_eeprom_info *eeprom);
+static int ixgbe_set_eeprom(struct rte_eth_dev *dev,
+				struct rte_dev_eeprom_info *eeprom);
+
+static int ixgbevf_get_reg_length(struct rte_eth_dev *dev);
+static int ixgbevf_get_regs(struct rte_eth_dev *dev,
+				struct rte_dev_reg_info *regs);
 
 static int ixgbe_timesync_enable(struct rte_eth_dev *dev);
 static int ixgbe_timesync_disable(struct rte_eth_dev *dev);
@@ -350,7 +376,9 @@ static const struct eth_dev_ops ixgbe_eth_dev_ops = {
 	.allmulticast_disable = ixgbe_dev_allmulticast_disable,
 	.link_update          = ixgbe_dev_link_update,
 	.stats_get            = ixgbe_dev_stats_get,
+	.xstats_get           = ixgbe_dev_xstats_get,
 	.stats_reset          = ixgbe_dev_stats_reset,
+	.xstats_reset         = ixgbe_dev_xstats_reset,
 	.queue_stats_mapping_set = ixgbe_dev_queue_stats_mapping_set,
 	.dev_infos_get        = ixgbe_dev_info_get,
 	.mtu_set              = ixgbe_dev_mtu_set,
@@ -375,6 +403,7 @@ static const struct eth_dev_ops ixgbe_eth_dev_ops = {
 	.priority_flow_ctrl_set = ixgbe_priority_flow_ctrl_set,
 	.mac_addr_add         = ixgbe_add_rar,
 	.mac_addr_remove      = ixgbe_remove_rar,
+	.mac_addr_set         = ixgbe_set_default_mac_addr,
 	.uc_hash_table_set    = ixgbe_uc_hash_table_set,
 	.uc_all_hash_table_set  = ixgbe_uc_all_hash_table_set,
 	.mirror_rule_set      = ixgbe_mirror_rule_set,
@@ -406,6 +435,11 @@ static const struct eth_dev_ops ixgbe_eth_dev_ops = {
 	.timesync_disable     = ixgbe_timesync_disable,
 	.timesync_read_rx_timestamp = ixgbe_timesync_read_rx_timestamp,
 	.timesync_read_tx_timestamp = ixgbe_timesync_read_tx_timestamp,
+	.get_reg_length       = ixgbe_get_reg_length,
+	.get_reg              = ixgbe_get_regs,
+	.get_eeprom_length    = ixgbe_get_eeprom_length,
+	.get_eeprom           = ixgbe_get_eeprom,
+	.set_eeprom           = ixgbe_set_eeprom,
 };
 
 /*
@@ -432,7 +466,45 @@ static const struct eth_dev_ops ixgbevf_eth_dev_ops = {
 	.mac_addr_add         = ixgbevf_add_mac_addr,
 	.mac_addr_remove      = ixgbevf_remove_mac_addr,
 	.set_mc_addr_list     = ixgbe_dev_set_mc_addr_list,
+	.mac_addr_set         = ixgbevf_set_default_mac_addr,
+	.get_reg_length       = ixgbevf_get_reg_length,
+	.get_reg              = ixgbevf_get_regs,
 };
+
+/* store statistics names and its offset in stats structure */
+struct rte_ixgbe_xstats_name_off {
+	char name[RTE_ETH_XSTATS_NAME_SIZE];
+	unsigned offset;
+};
+
+static const struct rte_ixgbe_xstats_name_off rte_ixgbe_stats_strings[] = {
+	{"rx_illegal_byte_err", offsetof(struct ixgbe_hw_stats, errbc)},
+	{"rx_len_err", offsetof(struct ixgbe_hw_stats, rlec)},
+	{"rx_undersize_count", offsetof(struct ixgbe_hw_stats, ruc)},
+	{"rx_oversize_count", offsetof(struct ixgbe_hw_stats, roc)},
+	{"rx_fragment_count", offsetof(struct ixgbe_hw_stats, rfc)},
+	{"rx_jabber_count", offsetof(struct ixgbe_hw_stats, rjc)},
+	{"l3_l4_xsum_error", offsetof(struct ixgbe_hw_stats, xec)},
+	{"mac_local_fault", offsetof(struct ixgbe_hw_stats, mlfc)},
+	{"mac_remote_fault", offsetof(struct ixgbe_hw_stats, mrfc)},
+	{"mac_short_pkt_discard", offsetof(struct ixgbe_hw_stats, mspdc)},
+	{"fccrc_error", offsetof(struct ixgbe_hw_stats, fccrc)},
+	{"fcoe_drop", offsetof(struct ixgbe_hw_stats, fcoerpdc)},
+	{"fc_last_error", offsetof(struct ixgbe_hw_stats, fclast)},
+	{"rx_broadcast_packets", offsetof(struct ixgbe_hw_stats, bprc)},
+	{"rx_phy_multicast_packets", offsetof(struct ixgbe_hw_stats, mprc)},
+	{"mgmt_pkts_dropped", offsetof(struct ixgbe_hw_stats, mngpdc)},
+	{"rx_crc_errors", offsetof(struct ixgbe_hw_stats, crcerrs)},
+	{"fdir_match", offsetof(struct ixgbe_hw_stats, fdirmatch)},
+	{"fdir_miss", offsetof(struct ixgbe_hw_stats, fdirmiss)},
+	{"tx_flow_control_xon", offsetof(struct ixgbe_hw_stats, lxontxc)},
+	{"rx_flow_control_xon", offsetof(struct ixgbe_hw_stats, lxonrxc)},
+	{"tx_flow_control_xoff", offsetof(struct ixgbe_hw_stats, lxofftxc)},
+	{"rx_flow_control_xoff", offsetof(struct ixgbe_hw_stats, lxoffrxc)},
+};
+
+#define IXGBE_NB_XSTATS (sizeof(rte_ixgbe_stats_strings) /	\
+		sizeof(rte_ixgbe_stats_strings[0]))
 
 /**
  * Atomically reads the link status information from global
@@ -945,6 +1017,46 @@ eth_ixgbe_dev_init(struct rte_eth_dev *eth_dev)
 	return 0;
 }
 
+static int
+eth_ixgbe_dev_uninit(struct rte_eth_dev *eth_dev)
+{
+	struct rte_pci_device *pci_dev;
+	struct ixgbe_hw *hw;
+
+	PMD_INIT_FUNC_TRACE();
+
+	if (rte_eal_process_type() != RTE_PROC_PRIMARY)
+		return -EPERM;
+
+	hw = IXGBE_DEV_PRIVATE_TO_HW(eth_dev->data->dev_private);
+	pci_dev = eth_dev->pci_dev;
+
+	if (hw->adapter_stopped == 0)
+		ixgbe_dev_close(eth_dev);
+
+	eth_dev->dev_ops = NULL;
+	eth_dev->rx_pkt_burst = NULL;
+	eth_dev->tx_pkt_burst = NULL;
+
+	/* Unlock any pending hardware semaphore */
+	ixgbe_swfw_lock_reset(hw);
+
+	/* disable uio intr before callback unregister */
+	rte_intr_disable(&(pci_dev->intr_handle));
+	rte_intr_callback_unregister(&(pci_dev->intr_handle),
+		ixgbe_dev_interrupt_handler, (void *)eth_dev);
+
+	/* uninitialize PF if max_vfs not zero */
+	ixgbe_pf_host_uninit(eth_dev);
+
+	rte_free(eth_dev->data->mac_addrs);
+	eth_dev->data->mac_addrs = NULL;
+
+	rte_free(eth_dev->data->hash_mac_addrs);
+	eth_dev->data->hash_mac_addrs = NULL;
+
+	return 0;
+}
 
 /*
  * Negotiate mailbox API version with the PF.
@@ -1118,13 +1230,58 @@ eth_ixgbevf_dev_init(struct rte_eth_dev *eth_dev)
 	return 0;
 }
 
+/* Virtual Function device uninit */
+
+static int
+eth_ixgbevf_dev_uninit(struct rte_eth_dev *eth_dev)
+{
+	struct ixgbe_hw *hw;
+	unsigned i;
+
+	PMD_INIT_FUNC_TRACE();
+
+	if (rte_eal_process_type() != RTE_PROC_PRIMARY)
+		return -EPERM;
+
+	hw = IXGBE_DEV_PRIVATE_TO_HW(eth_dev->data->dev_private);
+
+	if (hw->adapter_stopped == 0)
+		ixgbevf_dev_close(eth_dev);
+
+	eth_dev->dev_ops = NULL;
+	eth_dev->rx_pkt_burst = NULL;
+	eth_dev->tx_pkt_burst = NULL;
+
+	/* Disable the interrupts for VF */
+	ixgbevf_intr_disable(hw);
+
+	for (i = 0; i < eth_dev->data->nb_rx_queues; i++) {
+		ixgbe_dev_rx_queue_release(eth_dev->data->rx_queues[i]);
+		eth_dev->data->rx_queues[i] = NULL;
+	}
+	eth_dev->data->nb_rx_queues = 0;
+
+	for (i = 0; i < eth_dev->data->nb_tx_queues; i++) {
+		ixgbe_dev_tx_queue_release(eth_dev->data->tx_queues[i]);
+		eth_dev->data->tx_queues[i] = NULL;
+	}
+	eth_dev->data->nb_tx_queues = 0;
+
+	rte_free(eth_dev->data->mac_addrs);
+	eth_dev->data->mac_addrs = NULL;
+
+	return 0;
+}
+
 static struct eth_driver rte_ixgbe_pmd = {
 	.pci_drv = {
 		.name = "rte_ixgbe_pmd",
 		.id_table = pci_id_ixgbe_map,
-		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_INTR_LSC,
+		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_INTR_LSC |
+			RTE_PCI_DRV_DETACHABLE,
 	},
 	.eth_dev_init = eth_ixgbe_dev_init,
+	.eth_dev_uninit = eth_ixgbe_dev_uninit,
 	.dev_private_size = sizeof(struct ixgbe_adapter),
 };
 
@@ -1135,9 +1292,10 @@ static struct eth_driver rte_ixgbevf_pmd = {
 	.pci_drv = {
 		.name = "rte_ixgbevf_pmd",
 		.id_table = pci_id_ixgbevf_map,
-		.drv_flags = RTE_PCI_DRV_NEED_MAPPING,
+		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_DETACHABLE,
 	},
 	.eth_dev_init = eth_ixgbevf_dev_init,
+	.eth_dev_uninit = eth_ixgbevf_dev_uninit,
 	.dev_private_size = sizeof(struct ixgbe_adapter),
 };
 
@@ -1507,7 +1665,7 @@ ixgbe_dev_start(struct rte_eth_dev *dev)
 	}
 
 	/* stop adapter */
-	hw->adapter_stopped = FALSE;
+	hw->adapter_stopped = 0;
 	ixgbe_stop_adapter(hw);
 
 	/* reinitialize adapter
@@ -1665,7 +1823,7 @@ ixgbe_dev_stop(struct rte_eth_dev *dev)
 
 	/* reset the NIC */
 	ixgbe_pf_reset_hw(hw);
-	hw->adapter_stopped = FALSE;
+	hw->adapter_stopped = 0;
 
 	/* stop adapter */
 	ixgbe_stop_adapter(hw);
@@ -1781,29 +1939,23 @@ ixgbe_dev_close(struct rte_eth_dev *dev)
 	ixgbe_dev_stop(dev);
 	hw->adapter_stopped = 1;
 
+	ixgbe_dev_free_queues(dev);
+
 	ixgbe_disable_pcie_master(hw);
 
 	/* reprogram the RAR[0] in case user changed it. */
 	ixgbe_set_rar(hw, 0, hw->mac.addr, 0, IXGBE_RAH_AV);
 }
 
-/*
- * This function is based on ixgbe_update_stats_counters() in base/ixgbe.c
- */
 static void
-ixgbe_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
+ixgbe_read_stats_registers(struct ixgbe_hw *hw, struct ixgbe_hw_stats
+						   *hw_stats, uint64_t *total_missed_rx,
+						   uint64_t *total_qbrc, uint64_t *total_qprc,
+						   uint64_t *rxnfgpc, uint64_t *txdgpc,
+						   uint64_t *total_qprdc)
 {
-	struct ixgbe_hw *hw =
-			IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
-	struct ixgbe_hw_stats *hw_stats =
-			IXGBE_DEV_PRIVATE_TO_STATS(dev->data->dev_private);
 	uint32_t bprc, lxon, lxoff, total;
-	uint64_t total_missed_rx, total_qbrc, total_qprc;
 	unsigned i;
-
-	total_missed_rx = 0;
-	total_qbrc = 0;
-	total_qprc = 0;
 
 	hw_stats->crcerrs += IXGBE_READ_REG(hw, IXGBE_CRCERRS);
 	hw_stats->illerrc += IXGBE_READ_REG(hw, IXGBE_ILLERRC);
@@ -1816,7 +1968,7 @@ ixgbe_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 		/* global total per queue */
 		hw_stats->mpc[i] += mp;
 		/* Running comprehensive total for stats display */
-		total_missed_rx += hw_stats->mpc[i];
+		*total_missed_rx += hw_stats->mpc[i];
 		if (hw->mac.type == ixgbe_mac_82598EB)
 			hw_stats->rnbc[i] +=
 			    IXGBE_READ_REG(hw, IXGBE_RNBC(i));
@@ -1840,10 +1992,11 @@ ixgbe_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 		hw_stats->qbtc[i] += IXGBE_READ_REG(hw, IXGBE_QBTC_L(i));
 		hw_stats->qbtc[i] +=
 		    ((uint64_t)IXGBE_READ_REG(hw, IXGBE_QBTC_H(i)) << 32);
-		hw_stats->qprdc[i] += IXGBE_READ_REG(hw, IXGBE_QPRDC(i));
+		*total_qprdc += hw_stats->qprdc[i] +=
+				IXGBE_READ_REG(hw, IXGBE_QPRDC(i));
 
-		total_qprc += hw_stats->qprc[i];
-		total_qbrc += hw_stats->qbrc[i];
+		*total_qprc += hw_stats->qprc[i];
+		*total_qbrc += hw_stats->qbrc[i];
 	}
 	hw_stats->mlfc += IXGBE_READ_REG(hw, IXGBE_MLFC);
 	hw_stats->mrfc += IXGBE_READ_REG(hw, IXGBE_MRFC);
@@ -1851,6 +2004,8 @@ ixgbe_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 
 	/* Note that gprc counts missed packets */
 	hw_stats->gprc += IXGBE_READ_REG(hw, IXGBE_GPRC);
+	*rxnfgpc += IXGBE_READ_REG(hw, IXGBE_RXNFGPC);
+	*txdgpc += IXGBE_READ_REG(hw, IXGBE_TXDGPC);
 
 	if (hw->mac.type != ixgbe_mac_82598EB) {
 		hw_stats->gorc += IXGBE_READ_REG(hw, IXGBE_GORCL);
@@ -1928,6 +2083,35 @@ ixgbe_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 		hw_stats->fcoedwtc += IXGBE_READ_REG(hw, IXGBE_FCOEDWTC);
 	}
 
+	/* Flow Director Stats registers */
+	hw_stats->fdirmatch += IXGBE_READ_REG(hw, IXGBE_FDIRMATCH);
+	hw_stats->fdirmiss += IXGBE_READ_REG(hw, IXGBE_FDIRMISS);
+}
+
+/*
+ * This function is based on ixgbe_update_stats_counters() in ixgbe/ixgbe.c
+ */
+static void
+ixgbe_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
+{
+	struct ixgbe_hw *hw =
+			IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	struct ixgbe_hw_stats *hw_stats =
+			IXGBE_DEV_PRIVATE_TO_STATS(dev->data->dev_private);
+	uint64_t total_missed_rx, total_qbrc, total_qprc, total_qprdc;
+	uint64_t rxnfgpc, txdgpc;
+	unsigned i;
+
+	total_missed_rx = 0;
+	total_qbrc = 0;
+	total_qprc = 0;
+	total_qprdc = 0;
+	rxnfgpc = 0;
+	txdgpc = 0;
+
+	ixgbe_read_stats_registers(hw, hw_stats, &total_missed_rx, &total_qbrc,
+			&total_qprc, &rxnfgpc, &txdgpc, &total_qprdc);
+
 	if (stats == NULL)
 		return;
 
@@ -1936,7 +2120,6 @@ ixgbe_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 	stats->ibytes = total_qbrc;
 	stats->opackets = hw_stats->gptc;
 	stats->obytes = hw_stats->gotc;
-	stats->imcasts = hw_stats->mprc;
 
 	for (i = 0; i < IXGBE_QUEUE_STAT_COUNTERS; i++) {
 		stats->q_ipackets[i] = hw_stats->qprc[i];
@@ -1947,28 +2130,25 @@ ixgbe_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 	}
 
 	/* Rx Errors */
-	stats->ibadcrc  = hw_stats->crcerrs;
-	stats->ibadlen  = hw_stats->rlec + hw_stats->ruc + hw_stats->roc;
-	stats->imissed  = total_missed_rx;
-	stats->ierrors  = stats->ibadcrc +
-	                  stats->ibadlen +
-	                  stats->imissed +
-	                  hw_stats->illerrc + hw_stats->errbc;
+	stats->ierrors  = hw_stats->crcerrs +
+	                  hw_stats->rlec +
+	                  hw_stats->ruc +
+	                  hw_stats->roc +
+	                  total_missed_rx +
+	                  hw_stats->illerrc +
+	                  hw_stats->errbc +
+	                  hw_stats->xec +
+	                  hw_stats->mlfc +
+	                  hw_stats->mrfc +
+	                  hw_stats->rfc +
+	                  hw_stats->rjc +
+	                  hw_stats->fccrc +
+	                  hw_stats->fclast;
 
 	/* Tx Errors */
-	stats->oerrors  = 0;
-
-	/* XON/XOFF pause frames */
-	stats->tx_pause_xon  = hw_stats->lxontxc;
-	stats->rx_pause_xon  = hw_stats->lxonrxc;
-	stats->tx_pause_xoff = hw_stats->lxofftxc;
-	stats->rx_pause_xoff = hw_stats->lxoffrxc;
-
-	/* Flow Director Stats registers */
-	hw_stats->fdirmatch += IXGBE_READ_REG(hw, IXGBE_FDIRMATCH);
-	hw_stats->fdirmiss += IXGBE_READ_REG(hw, IXGBE_FDIRMISS);
-	stats->fdirmatch = hw_stats->fdirmatch;
-	stats->fdirmiss = hw_stats->fdirmiss;
+	/*txdgpc: packets that are DMA'ed*/
+	/*gptc: packets that are sent*/
+	stats->oerrors  = txdgpc - hw_stats->gptc;
 }
 
 static void
@@ -1979,6 +2159,61 @@ ixgbe_dev_stats_reset(struct rte_eth_dev *dev)
 
 	/* HW registers are cleared on read */
 	ixgbe_dev_stats_get(dev, NULL);
+
+	/* Reset software totals */
+	memset(stats, 0, sizeof(*stats));
+}
+
+static int
+ixgbe_dev_xstats_get(struct rte_eth_dev *dev, struct rte_eth_xstats *xstats,
+					 unsigned n)
+{
+	struct ixgbe_hw *hw =
+			IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	struct ixgbe_hw_stats *hw_stats =
+			IXGBE_DEV_PRIVATE_TO_STATS(dev->data->dev_private);
+	uint64_t total_missed_rx, total_qbrc, total_qprc, total_qprdc;
+	uint64_t rxnfgpc, txdgpc;
+	unsigned i, count = IXGBE_NB_XSTATS;
+
+	if (n < count)
+		return count;
+
+	total_missed_rx = 0;
+	total_qbrc = 0;
+	total_qprc = 0;
+	total_qprdc = 0;
+	rxnfgpc = 0;
+	txdgpc = 0;
+
+	ixgbe_read_stats_registers(hw, hw_stats, &total_missed_rx, &total_qbrc,
+							   &total_qprc, &rxnfgpc, &txdgpc, &total_qprdc);
+
+	/* If this is a reset xstats is NULL, and we have cleared the
+	 * registers by reading them.
+	 */
+	if (!xstats)
+		return 0;
+
+	/* Extended stats */
+	for (i = 0; i < IXGBE_NB_XSTATS; i++) {
+		snprintf(xstats[i].name, sizeof(xstats[i].name),
+				"%s", rte_ixgbe_stats_strings[i].name);
+		xstats[i].value = *(uint64_t *)(((char *)hw_stats) +
+							rte_ixgbe_stats_strings[i].offset);
+	}
+
+	return count;
+}
+
+static void
+ixgbe_dev_xstats_reset(struct rte_eth_dev *dev)
+{
+	struct ixgbe_hw_stats *stats =
+			IXGBE_DEV_PRIVATE_TO_STATS(dev->data->dev_private);
+
+	/* HW registers are cleared on read */
+	ixgbe_dev_xstats_get(dev, NULL, IXGBE_NB_XSTATS);
 
 	/* Reset software totals */
 	memset(stats, 0, sizeof(*stats));
@@ -2019,6 +2254,7 @@ ixgbevf_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 	stats->opackets = hw_stats->vfgptc;
 	stats->obytes = hw_stats->vfgotc;
 	stats->imcasts = hw_stats->vfmprc;
+	/* stats->imcasts should be removed as imcasts is deprecated */
 }
 
 static void
@@ -2928,6 +3164,14 @@ ixgbe_remove_rar(struct rte_eth_dev *dev, uint32_t index)
 	ixgbe_clear_rar(hw, index);
 }
 
+static void
+ixgbe_set_default_mac_addr(struct rte_eth_dev *dev, struct ether_addr *addr)
+{
+	ixgbe_remove_rar(dev, 0);
+
+	ixgbe_add_rar(dev, addr, 0, 0);
+}
+
 static int
 ixgbe_dev_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
 {
@@ -3069,7 +3313,7 @@ ixgbevf_dev_stop(struct rte_eth_dev *dev)
 
 	PMD_INIT_FUNC_TRACE();
 
-	hw->adapter_stopped = TRUE;
+	hw->adapter_stopped = 1;
 	ixgbe_stop_adapter(hw);
 
 	/*
@@ -3094,6 +3338,8 @@ ixgbevf_dev_close(struct rte_eth_dev *dev)
 	ixgbe_reset_hw(hw);
 
 	ixgbevf_dev_stop(dev);
+
+	ixgbe_dev_free_queues(dev);
 
 	/* reprogram the RAR[0] in case user changed it. */
 	ixgbe_set_rar(hw, 0, hw->mac.addr, 0, IXGBE_RAH_AV);
@@ -3783,6 +4029,14 @@ ixgbevf_remove_mac_addr(struct rte_eth_dev *dev, uint32_t index)
 				    mac_addr->addr_bytes[5],
 				    diag);
 	}
+}
+
+static void
+ixgbevf_set_default_mac_addr(struct rte_eth_dev *dev, struct ether_addr *addr)
+{
+	struct ixgbe_hw *hw = IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+
+	hw->mac.ops.set_rar(hw, 0, (void *)addr, 0, 0);
 }
 
 #define MAC_TYPE_FILTER_SUP(type)    do {\
@@ -4525,8 +4779,8 @@ ixgbe_dev_addr_list_itr(__attribute__((unused)) struct ixgbe_hw *hw,
 
 static int
 ixgbe_dev_set_mc_addr_list(struct rte_eth_dev *dev,
-			   struct ether_addr *mc_addr_set,
-			   uint32_t nb_mc_addr)
+			  struct ether_addr *mc_addr_set,
+			  uint32_t nb_mc_addr)
 {
 	struct ixgbe_hw *hw;
 	u8 *mc_addr_list;
@@ -4639,6 +4893,134 @@ ixgbe_timesync_read_tx_timestamp(struct rte_eth_dev *dev,
 	timestamp->tv_nsec = 0;
 
 	return  0;
+}
+
+static int
+ixgbe_get_reg_length(struct rte_eth_dev *dev)
+{
+	struct ixgbe_hw *hw = IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	int count = 0;
+	int g_ind = 0;
+	const struct reg_info *reg_group;
+	const struct reg_info **reg_set = (hw->mac.type == ixgbe_mac_82598EB) ?
+				    ixgbe_regs_mac_82598EB : ixgbe_regs_others;
+
+	while ((reg_group = reg_set[g_ind++]))
+		count += ixgbe_regs_group_count(reg_group);
+
+	return count;
+}
+
+static int
+ixgbevf_get_reg_length(struct rte_eth_dev *dev __rte_unused)
+{
+	int count = 0;
+	int g_ind = 0;
+	const struct reg_info *reg_group;
+
+	while ((reg_group = ixgbevf_regs[g_ind++]))
+		count += ixgbe_regs_group_count(reg_group);
+
+	return count;
+}
+
+static int
+ixgbe_get_regs(struct rte_eth_dev *dev,
+	      struct rte_dev_reg_info *regs)
+{
+	struct ixgbe_hw *hw = IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	uint32_t *data = regs->data;
+	int g_ind = 0;
+	int count = 0;
+	const struct reg_info *reg_group;
+	const struct reg_info **reg_set = (hw->mac.type == ixgbe_mac_82598EB) ?
+				    ixgbe_regs_mac_82598EB : ixgbe_regs_others;
+
+	/* Support only full register dump */
+	if ((regs->length == 0) ||
+	    (regs->length == (uint32_t)ixgbe_get_reg_length(dev))) {
+		regs->version = hw->mac.type << 24 | hw->revision_id << 16 |
+			hw->device_id;
+		while ((reg_group = reg_set[g_ind++]))
+			count += ixgbe_read_regs_group(dev, &data[count],
+				reg_group);
+		return 0;
+	}
+
+	return -ENOTSUP;
+}
+
+static int
+ixgbevf_get_regs(struct rte_eth_dev *dev,
+		struct rte_dev_reg_info *regs)
+{
+	struct ixgbe_hw *hw = IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	uint32_t *data = regs->data;
+	int g_ind = 0;
+	int count = 0;
+	const struct reg_info *reg_group;
+
+	/* Support only full register dump */
+	if ((regs->length == 0) ||
+	    (regs->length == (uint32_t)ixgbevf_get_reg_length(dev))) {
+		regs->version = hw->mac.type << 24 | hw->revision_id << 16 |
+			hw->device_id;
+		while ((reg_group = ixgbevf_regs[g_ind++]))
+			count += ixgbe_read_regs_group(dev, &data[count],
+						      reg_group);
+		return 0;
+	}
+
+	return -ENOTSUP;
+}
+
+static int
+ixgbe_get_eeprom_length(struct rte_eth_dev *dev)
+{
+	struct ixgbe_hw *hw = IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+
+	/* Return unit is byte count */
+	return hw->eeprom.word_size * 2;
+}
+
+static int
+ixgbe_get_eeprom(struct rte_eth_dev *dev,
+		struct rte_dev_eeprom_info *in_eeprom)
+{
+	struct ixgbe_hw *hw = IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	struct ixgbe_eeprom_info *eeprom = &hw->eeprom;
+	uint16_t *data = in_eeprom->data;
+	int first, length;
+
+	first = in_eeprom->offset >> 1;
+	length = in_eeprom->length >> 1;
+	if ((first >= hw->eeprom.word_size) ||
+	    ((first + length) >= hw->eeprom.word_size))
+		return -EINVAL;
+
+	in_eeprom->magic = hw->vendor_id | (hw->device_id << 16);
+
+	return eeprom->ops.read_buffer(hw, first, length, data);
+}
+
+static int
+ixgbe_set_eeprom(struct rte_eth_dev *dev,
+		struct rte_dev_eeprom_info *in_eeprom)
+{
+	struct ixgbe_hw *hw = IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	struct ixgbe_eeprom_info *eeprom = &hw->eeprom;
+	uint16_t *data = in_eeprom->data;
+	int first, length;
+
+	first = in_eeprom->offset >> 1;
+	length = in_eeprom->length >> 1;
+	if ((first >= hw->eeprom.word_size) ||
+	    ((first + length) >= hw->eeprom.word_size))
+		return -EINVAL;
+
+	in_eeprom->magic = hw->vendor_id | (hw->device_id << 16);
+
+	return eeprom->ops.write_buffer(hw,  first, length, data);
 }
 
 static struct rte_driver rte_ixgbe_driver = {

@@ -1515,6 +1515,24 @@ em_dev_clear_queues(struct rte_eth_dev *dev)
 	}
 }
 
+void
+em_dev_free_queues(struct rte_eth_dev *dev)
+{
+	uint16_t i;
+
+	for (i = 0; i < dev->data->nb_rx_queues; i++) {
+		eth_em_rx_queue_release(dev->data->rx_queues[i]);
+		dev->data->rx_queues[i] = NULL;
+	}
+	dev->data->nb_rx_queues = 0;
+
+	for (i = 0; i < dev->data->nb_tx_queues; i++) {
+		eth_em_tx_queue_release(dev->data->tx_queues[i]);
+		dev->data->tx_queues[i] = NULL;
+	}
+	dev->data->nb_tx_queues = 0;
+}
+
 /*
  * Takes as input/output parameter RX buffer size.
  * Returns (BSIZE | BSEX | FLXBUF) fields of RCTL register.
