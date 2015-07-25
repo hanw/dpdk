@@ -59,30 +59,6 @@
 #include "sonic_ethdev.h"
 #include "sonic_logs.h"
 
-struct pmd_internals;
-
-struct sonic_queue {
-	struct pmd_internals *internals;
-
-	struct rte_mempool *mb_pool;
-	struct rte_mbuf *dummy_packet;
-
-	rte_atomic64_t rx_pkts;
-	rte_atomic64_t tx_pkts;
-	rte_atomic64_t err_pkts;
-};
-
-struct pmd_internals {
-	unsigned packet_size;
-	unsigned numa_node;
-
-	unsigned nb_rx_queues;
-	unsigned nb_tx_queues;
-
-	struct sonic_queue rx_sonic_queues[1];
-	struct sonic_queue tx_sonic_queues[1];
-};
-
 static struct ether_addr eth_addr = { .addr_bytes = {0} };
 static const char *drivername = "SONIC PMD";
 static struct rte_eth_link pmd_link = {
@@ -291,7 +267,10 @@ sonic_dev_info_get(struct rte_eth_dev *dev, struct rte_eth_dev_info *dev_info)
 
 static int
 sonic_dev_link_update(struct rte_eth_dev *dev __rte_unused,
-		int wait_to_complete __rte_unused) { return 0; }
+		int wait_to_complete __rte_unused) {
+    PMD_INIT_FUNC_TRACE();
+    return 0;
+}
 
 static int
 sonic_dev_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
@@ -311,6 +290,51 @@ static void
 sonic_remove_rar(struct rte_eth_dev *dev, uint32_t index)
 {
     PMD_INIT_FUNC_TRACE();
+}
+
+static inline uint16_t
+rx_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
+	     uint16_t nb_pkts)
+{
+	int i;
+	struct sonic_queue *h = rx_queue;
+	unsigned packet_size;
+
+	if ((rx_queue == NULL) || (rx_pkts == NULL))
+		return 0;
+
+	packet_size = h->internals->packet_size;
+	for (i = 0; i < nb_pkts; i++) {
+		rx_pkts[i] = rte_pktmbuf_alloc(h->mb_pool);
+		if (!rx_pkts[i])
+			break;
+		rx_pkts[i]->data_len = (uint16_t)packet_size;
+		rx_pkts[i]->pkt_len = packet_size;
+		rx_pkts[i]->nb_segs = 1;
+		rx_pkts[i]->next = NULL;
+	}
+
+	rte_atomic64_add(&(h->rx_pkts), i);
+
+	return i;
+}
+
+static inline uint16_t
+tx_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
+	     uint16_t nb_pkts)
+{
+	int i;
+	struct sonic_queue *h = tx_queue;
+
+	if ((tx_queue == NULL) || (tx_pkts == NULL))
+		return 0;
+
+	for (i = 0; i < nb_pkts; i++)
+		rte_pktmbuf_free(tx_pkts[i]);
+
+	rte_atomic64_add(&(h->tx_pkts), i);
+
+	return i;
 }
 
 static int
@@ -415,8 +439,21 @@ rte_pmd_sonic_devinit(const char *name, const char *params)
 static int
 rte_pmd_sonic_devuninit(const char *name)
 {
-    // stub
-    RTE_LOG(DEBUG, PMD, "Uninitialize sonic network device\n");
+	struct rte_eth_dev *eth_dev = NULL;
+
+	if (name == NULL)
+		return -EINVAL;
+
+	/* reserve an ethdev entry */
+	eth_dev = rte_eth_dev_allocated(name);
+	if (eth_dev == NULL)
+		return -1;
+
+	rte_free(eth_dev->data->dev_private);
+	rte_free(eth_dev->data);
+	rte_free(eth_dev->pci_dev);
+
+	rte_eth_dev_release_port(eth_dev);
     return 0;
 }
 

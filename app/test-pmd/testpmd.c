@@ -870,8 +870,9 @@ flush_fwd_rx_queues(void)
 				do {
 					nb_rx = rte_eth_rx_burst(port_id, rxq,
 						pkts_burst, MAX_PKT_BURST);
-					for (i = 0; i < nb_rx; i++)
+					for (i = 0; i < nb_rx; i++) {
 						rte_pktmbuf_free(pkts_burst[i]);
+                        }
 				} while (nb_rx > 0);
 			}
 		}
@@ -1610,7 +1611,6 @@ check_all_ports_link_status(uint32_t port_mask)
 			if ((port_mask & (1 << portid)) == 0)
 				continue;
 			memset(&link, 0, sizeof(link));
-	    printf("eth link %d get nowait...\n", portid);
 			rte_eth_link_get_nowait(portid, &link);
 			/* print link status if flag set */
 			if (print_flag == 1) {
