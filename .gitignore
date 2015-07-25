@@ -13,3 +13,4 @@ _postinstall
 build
 cscope.out
 *.log
+tmp.*

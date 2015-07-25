@@ -70,7 +70,7 @@ sonic_dev_rx_queue_setup(struct rte_eth_dev *dev,
 			 const struct rte_eth_rxconf *rx_conf,
 			 struct rte_mempool *mb_pool)
 {
-    PMD_RX_LOG(DEBUG, "rx_queue_setup\n");
+    PMD_RX_LOG(DEBUG, "rx_queue_setup");
 	struct rte_mbuf *dummy_packet;
 	struct pmd_internals *internals;
 	unsigned packet_size;
@@ -122,7 +122,7 @@ sonic_dev_tx_queue_setup(struct rte_eth_dev *dev,
 			 unsigned int socket_id,
 			 const struct rte_eth_txconf *tx_conf)
 {
-    PMD_TX_LOG(DEBUG, "tx_queue_setup\n");
+    PMD_TX_LOG(DEBUG, "tx_queue_setup");
 	struct rte_mbuf *dummy_packet;
 	struct pmd_internals *internals;
 	unsigned packet_size;

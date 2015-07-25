@@ -81,6 +81,8 @@
 
 uint16_t verbose_level = 0; /**< Silent by default. */
 
+char bsim_lib_path[PATH_MAX_LEN];
+
 /* use master core for command line ? */
 uint8_t interactive = 0;
 uint8_t auto_start = 0;
@@ -273,6 +275,10 @@ uint8_t no_link_check = 0; /* check by default */
 uint32_t bypass_timeout = RTE_BYPASS_TMT_OFF;
 
 #endif
+
+/* bsim */
+void * bsim_handle;
+int (*testcase) (void);
 
 /*
  * Ethernet device configuration.
@@ -573,7 +579,6 @@ init_config(void)
 		fwd_lcores[lc_id]->mbp = mbp;
 	}
 
-    printf("init port config...\n");
 	/* Configuration of packet forwarding streams. */
 	if (init_fwd_streams() < 0)
 		rte_exit(EXIT_FAILURE, "FAIL from init_fwd_streams()\n");
@@ -1283,7 +1288,6 @@ start_port(portid_t pid)
 	if (port_id_is_invalid(pid, ENABLED_WARN))
 		return 0;
 
-    printf("start port ...\n");
 	if (init_fwd_streams() < 0) {
 		printf("Fail from init_fwd_streams()\n");
 		return -1;

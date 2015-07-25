@@ -68,6 +68,8 @@
 #define NUMA_NO_CONFIG 0xFF
 #define UMA_NO_CONFIG  0xFF
 
+#define PATH_MAX_LEN 256
+
 typedef uint8_t  lcoreid_t;
 typedef uint8_t  portid_t;
 typedef uint16_t queueid_t;
@@ -303,6 +305,11 @@ extern int32_t nb_tx_limits; /**<set by "--tx-limits" parameter */
 extern uint8_t  mp_anon; /**< set by "--mp-anon" parameter */
 extern uint8_t no_link_check; /**<set by "--disable-link-check" parameter */
 extern volatile int test_done; /* stop packet forwarding when set to 1. */
+
+/* bluesim simulation */
+extern char bsim_lib_path[PATH_MAX_LEN];
+extern void* bsim_handle;
+extern int (*testcase)(void);
 
 #ifdef RTE_NIC_BYPASS
 extern uint32_t bypass_timeout; /**< Store the NIC bypass watchdog timeout */

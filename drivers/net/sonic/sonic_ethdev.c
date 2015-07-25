@@ -352,6 +352,7 @@ rx_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 	packet_size = h->internals->packet_size;
 	for (i = 0; i < nb_pkts; i++) {
 		rx_pkts[i] = rte_pktmbuf_alloc(h->mb_pool);
+        //printf("rx_pkts[%d], virtaddr=%p, phyaddr=%lx\n", i, rx_pkts[i]->buf_addr, rx_pkts[i]->buf_physaddr);
 		if (!rx_pkts[i])
 			break;
 		rx_pkts[i]->data_len = (uint16_t)packet_size;

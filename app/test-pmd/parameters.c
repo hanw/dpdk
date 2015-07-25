@@ -42,6 +42,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <errno.h>
+#include <dlfcn.h>
 
 #include <sys/queue.h>
 #include <sys/stat.h>
@@ -99,7 +100,8 @@ usage(char* progname)
 	       "--rss-ip | --rss-udp | "
 	       "--rxpt= | --rxht= | --rxwt= | --rxfreet= | "
 	       "--txpt= | --txht= | --txwt= | --txfreet= | "
-	       "--txrst= | --txqflags= ]\n",
+	       "--txrst= | --txqflags= "
+           "--link-lib=<bsim>.so ]\n",
 	       progname);
 #ifdef RTE_LIBRTE_CMDLINE
 	printf("  --interactive: run in interactive mode.\n");
@@ -193,6 +195,7 @@ usage(char* progname)
 	       " Used mainly with PCAP drivers.\n");
 	printf("  --txpkts=X[,Y]*: set TX segment sizes.\n");
 	printf("  --tx-limits=X*: set TX packet count limits.\n");
+	printf("  --link-lib=<bsim.so>: link library for bsim simulation\n");
 	printf("  --disable-link-check: disable check on link status when "
 	       "starting/stopping ports.\n");
 }
@@ -558,6 +561,7 @@ launch_args_parse(int argc, char** argv)
 		{ "no-flush-rx",	0, 0, 0 },
 		{ "txpkts",			1, 0, 0 },
 		{ "tx-limits",	    1, 0, 0 },
+		{ "link-lib",	        1, 0, 0 },
 		{ "disable-link-check",		0, 0, 0 },
 		{ 0, 0, 0, 0 },
 	};
@@ -969,6 +973,19 @@ launch_args_parse(int argc, char** argv)
                 }
             }
 #endif
+			if (!strcmp(lgopts[opt_idx].name, "link-lib")) {
+                snprintf(bsim_lib_path, PATH_MAX_LEN, "%s", optarg);
+
+                bsim_handle = dlopen(bsim_lib_path, RTLD_LAZY);
+                if (!bsim_handle) {
+			        rte_exit(EXIT_FAILURE, "Unable to find %s\n", bsim_lib_path);
+                }
+                testcase = dlsym(bsim_handle, "testcase");
+                printf("testcase %p\n", testcase);
+                if (testcase)
+                    testcase();
+            }
+
 			if (!strcmp(lgopts[opt_idx].name, "no-flush-rx"))
 				no_flush_rx = 1;
 			if (!strcmp(lgopts[opt_idx].name, "disable-link-check"))
