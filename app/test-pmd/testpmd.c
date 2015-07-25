@@ -566,6 +566,7 @@ init_config(void)
 		fwd_lcores[lc_id]->mbp = mbp;
 	}
 
+    printf("init port config...\n");
 	/* Configuration of packet forwarding streams. */
 	if (init_fwd_streams() < 0)
 		rte_exit(EXIT_FAILURE, "FAIL from init_fwd_streams()\n");
@@ -600,6 +601,7 @@ init_fwd_streams(void)
 	/* set socket id according to numa or not */
 	FOREACH_PORT(pid, ports) {
 		port = &ports[pid];
+        RTE_LOG(DEBUG, PMD, "%s: %d\n", __func__, __LINE__);
 		if (nb_rxq > port->dev_info.max_rx_queues) {
 			printf("Fail: nb_rxq(%d) is greater than "
 				"max_rx_queues(%d)\n", nb_rxq,
@@ -1266,6 +1268,7 @@ start_port(portid_t pid)
 	if (port_id_is_invalid(pid, ENABLED_WARN))
 		return 0;
 
+    printf("start port ...\n");
 	if (init_fwd_streams() < 0) {
 		printf("Fail from init_fwd_streams()\n");
 		return -1;
@@ -1398,8 +1401,9 @@ start_port(portid_t pid)
 		need_check_link_status = 1;
 	}
 
-	if (need_check_link_status == 1 && !no_link_check)
+	if (need_check_link_status == 1 && !no_link_check) {
 		check_all_ports_link_status(RTE_PORT_ALL);
+    }
 	else if (need_check_link_status == 0)
 		printf("Please stop the ports first\n");
 
@@ -1606,6 +1610,7 @@ check_all_ports_link_status(uint32_t port_mask)
 			if ((port_mask & (1 << portid)) == 0)
 				continue;
 			memset(&link, 0, sizeof(link));
+	    printf("eth link %d get nowait...\n", portid);
 			rte_eth_link_get_nowait(portid, &link);
 			/* print link status if flag set */
 			if (print_flag == 1) {

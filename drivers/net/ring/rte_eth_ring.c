@@ -146,6 +146,7 @@ eth_rx_queue_setup(struct rte_eth_dev *dev,uint16_t rx_queue_id,
 {
 	struct pmd_internals *internals = dev->data->dev_private;
 	dev->data->rx_queues[rx_queue_id] = &internals->rx_ring_queues[rx_queue_id];
+    RTE_LOG(DEBUG, PMD, "%s: rx_queue=%p rx_queue_id=%d\n", __func__, dev->data->rx_queues[rx_queue_id], rx_queue_id);
 	return 0;
 }
 
@@ -157,6 +158,7 @@ eth_tx_queue_setup(struct rte_eth_dev *dev, uint16_t tx_queue_id,
 {
 	struct pmd_internals *internals = dev->data->dev_private;
 	dev->data->tx_queues[tx_queue_id] = &internals->tx_ring_queues[tx_queue_id];
+    RTE_LOG(DEBUG, PMD, "%s: tx_queue=%p, tx_queue_id=%d\n", __func__, dev->data->tx_queues[tx_queue_id], tx_queue_id);
 	return 0;
 }
 

@@ -45,5 +45,17 @@ int sonic_dev_tx_queue_start(struct rte_eth_dev *dev, uint16_t tx_queue_id);
 
 int sonic_dev_tx_queue_stop(struct rte_eth_dev *dev, uint16_t tx_queue_id);
 
+static inline uint16_t
+rx_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
+	     uint16_t nb_pkts)
+{
 
+}
+
+static inline uint16_t
+tx_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
+	     uint16_t nb_pkts)
+{
+
+}
 #endif /* _SONIC_ETHDEV_H_ */

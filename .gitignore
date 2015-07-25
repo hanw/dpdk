@@ -11,3 +11,5 @@ Module.symvers
 _postbuild
 _postinstall
 build
+cscope.out
+*.log

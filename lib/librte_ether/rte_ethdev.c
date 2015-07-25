@@ -1580,6 +1580,7 @@ rte_eth_dev_atomic_read_link_status(struct rte_eth_dev *dev,
 	struct rte_eth_link *dst = link;
 	struct rte_eth_link *src = &(dev->data->dev_link);
 
+    printf("link dst=%p, src=%p\n", dst, src);
 	if (rte_atomic64_cmpset((uint64_t *)dst, *(uint64_t *)dst,
 					*(uint64_t *)src) == 0)
 		return -1;
@@ -1612,10 +1613,13 @@ rte_eth_link_get_nowait(uint8_t port_id, struct rte_eth_link *eth_link)
 	VALID_PORTID_OR_RET(port_id);
 	dev = &rte_eth_devices[port_id];
 
-	if (dev->data->dev_conf.intr_conf.lsc != 0)
+	if (dev->data->dev_conf.intr_conf.lsc != 0) {
+        printf("read link status\n");
 		rte_eth_dev_atomic_read_link_status(dev, eth_link);
+    }
 	else {
 		FUNC_PTR_OR_RET(*dev->dev_ops->link_update);
+        printf("read link update\n");
 		(*dev->dev_ops->link_update)(dev, 0);
 		*eth_link = dev->data->dev_link;
 	}

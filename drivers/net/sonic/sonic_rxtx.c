@@ -79,6 +79,12 @@ sonic_rx_queue_release(struct sonic_rx_queue *rxq)
    // stub
 }
 
+void __attribute__((cold))
+sonic_dev_rx_queue_release(void *rxq)
+{
+	sonic_rx_queue_release(rxq);
+}
+
 int __attribute__((cold))
 sonic_dev_tx_queue_setup(struct rte_eth_dev *dev,
 			 uint16_t queue_idx,
@@ -87,6 +93,7 @@ sonic_dev_tx_queue_setup(struct rte_eth_dev *dev,
 			 const struct rte_eth_txconf *tx_conf)
 {
    // stub
+   RTE_LOG(DEBUG, SONIC, "test");
    return 0;
 }
 
@@ -94,6 +101,12 @@ static void __attribute__((cold))
 sonic_tx_queue_release(struct sonic_tx_queue *txq)
 {
    // stub
+}
+
+void __attribute__((cold))
+sonic_dev_tx_queue_release(void *txq)
+{
+	sonic_tx_queue_release(txq);
 }
 
 /*
@@ -135,6 +148,5 @@ sonic_dev_tx_queue_stop(struct rte_eth_dev *dev, uint16_t tx_queue_id)
    // stub
    return 0;
 }
-
 
 

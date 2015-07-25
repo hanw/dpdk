@@ -75,6 +75,7 @@ rte_eal_vdev_init(const char *name, const char *args)
 		if (driver->type != PMD_VDEV)
 			continue;
 
+        RTE_LOG(DEBUG, EAL, "%s: search driver %s\n", __func__, driver->name);
 		/*
 		 * search a driver prefix in virtual device name.
 		 * For example, if the driver is pcap PMD, driver->name
