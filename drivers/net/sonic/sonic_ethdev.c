@@ -237,12 +237,58 @@ static void
 sonic_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 {
     PMD_INIT_FUNC_TRACE();
+	unsigned i, num_stats;
+	unsigned long rx_total = 0, tx_total = 0, tx_err_total = 0;
+	const struct pmd_internals *internal;
+
+	if ((dev == NULL) || (stats == NULL))
+		return;
+
+	internal = dev->data->dev_private;
+	num_stats = RTE_MIN((unsigned)RTE_ETHDEV_QUEUE_STAT_CNTRS,
+			RTE_MIN(internal->nb_rx_queues,
+				RTE_DIM(internal->rx_sonic_queues)));
+	for (i = 0; i < num_stats; i++) {
+		stats->q_ipackets[i] =
+			internal->rx_sonic_queues[i].rx_pkts.cnt;
+		rx_total += stats->q_ipackets[i];
+	}
+
+	num_stats = RTE_MIN((unsigned)RTE_ETHDEV_QUEUE_STAT_CNTRS,
+			RTE_MIN(internal->nb_tx_queues,
+				RTE_DIM(internal->tx_sonic_queues)));
+	for (i = 0; i < num_stats; i++) {
+		stats->q_opackets[i] =
+			internal->tx_sonic_queues[i].tx_pkts.cnt;
+		stats->q_errors[i] =
+			internal->tx_sonic_queues[i].err_pkts.cnt;
+		tx_total += stats->q_opackets[i];
+		tx_err_total += stats->q_errors[i];
+	}
+
+	stats->ipackets = rx_total;
+	stats->opackets = tx_total;
+	stats->oerrors = tx_err_total;
 }
 
 static void
 sonic_dev_stats_reset(struct rte_eth_dev *dev)
 {
     PMD_INIT_FUNC_TRACE();
+	unsigned i;
+	struct pmd_internals *internal;
+
+	if (dev == NULL)
+		return;
+
+	internal = dev->data->dev_private;
+	for (i = 0; i < RTE_DIM(internal->rx_sonic_queues); i++)
+		internal->rx_sonic_queues[i].rx_pkts.cnt = 0;
+	for (i = 0; i < RTE_DIM(internal->tx_sonic_queues); i++) {
+		internal->tx_sonic_queues[i].tx_pkts.cnt = 0;
+		internal->tx_sonic_queues[i].err_pkts.cnt = 0;
+	}
+
 }
 
 static void
