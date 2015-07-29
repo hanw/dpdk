@@ -120,6 +120,7 @@ pkt_burst_receive(struct fwd_stream *fs)
 #endif
 	fs->rx_packets += nb_rx;
 
+    printf("burst rxonly\n");
 	/*
 	 * Dump each received packet if verbose_level > 0.
 	 */

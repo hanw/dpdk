@@ -81,8 +81,6 @@
 
 uint16_t verbose_level = 0; /**< Silent by default. */
 
-char bsim_lib_path[PATH_MAX_LEN];
-
 /* use master core for command line ? */
 uint8_t interactive = 0;
 uint8_t auto_start = 0;
@@ -204,7 +202,7 @@ queueid_t nb_txq = 1; /**< Number of TX queues per port. */
  * Configurable number of RX/TX ring descriptors.
  */
 #define RTE_TEST_RX_DESC_DEFAULT 128
-#define RTE_TEST_TX_DESC_DEFAULT 512
+#define RTE_TEST_TX_DESC_DEFAULT 256
 uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT; /**< Number of RX descriptors. */
 uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT; /**< Number of TX descriptors. */
 
@@ -275,10 +273,6 @@ uint8_t no_link_check = 0; /* check by default */
 uint32_t bypass_timeout = RTE_BYPASS_TMT_OFF;
 
 #endif
-
-/* bsim */
-void * bsim_handle;
-int (*testcase) (void);
 
 /*
  * Ethernet device configuration.
@@ -435,10 +429,12 @@ mbuf_pool_create(uint16_t mbuf_seg_size, unsigned nb_mbuf,
 				    rte_pktmbuf_pool_init, NULL,
 				    rte_pktmbuf_init, NULL,
 				    socket_id, 0);
-	else
+	else {
 		/* wrapper to rte_mempool_create() */
 		rte_mp = rte_pktmbuf_pool_create(pool_name, nb_mbuf,
 			mb_mempool_cache, 0, mbuf_seg_size, socket_id);
+        RTE_LOG(DEBUG, PMD, "create mempool for pkt\n");
+    }
 
 #endif
 

@@ -21,12 +21,21 @@
 
 include $(RTE_SDK)/mk/rte.vars.mk
 
+ifndef SONIC_INCLUDE
+    $(error SONIC_INCLUDE is undefined, should point to generated /jni directory)
+endif
+ifndef CONNECTAL_INCLUDE
+    $(error CONNECTAL_INCLUDE is undefined, should point to <CONNECTAL>/cpp directory)
+endif
+
 #
 # library name
 #
 LIB = librte_pmd_sonic.a
 
 CFLAGS += -O3
+CFLAGS += -I $(CONNECTAL_INCLUDE)
+CFLAGS += -I $(SONIC_INCLUDE)
 #CFLAGS += $(WERROR_FLAGS)
 
 EXPORT_MAP := rte_pmd_sonic_version.map

@@ -103,6 +103,7 @@ pkt_burst_mac_forward(struct fwd_stream *fs)
 	if (unlikely(nb_rx == 0))
 		return;
 
+    printf("burst mac fwd\n");
 #ifdef RTE_TEST_PMD_RECORD_BURST_STATS
 	fs->rx_burst_stats.pkt_burst_spread[nb_rx]++;
 #endif

@@ -18,34 +18,9 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-
-#include "sonic_logs.h"
-
 #ifndef _SONIC_ETHDEV_H_
 
-struct pmd_internals;
-
-struct sonic_queue {
-	struct pmd_internals *internals;
-
-	struct rte_mempool *mb_pool;
-	struct rte_mbuf *dummy_packet;
-
-	rte_atomic64_t rx_pkts;
-	rte_atomic64_t tx_pkts;
-	rte_atomic64_t err_pkts;
-};
-
-struct pmd_internals {
-	unsigned packet_size;
-	unsigned numa_node;
-
-	unsigned nb_rx_queues;
-	unsigned nb_tx_queues;
-
-	struct sonic_queue rx_sonic_queues[1];
-	struct sonic_queue tx_sonic_queues[1];
-};
+#include "sonic_logs.h"
 
 /*
  * RX/TX function prototypes
@@ -71,5 +46,25 @@ int sonic_dev_rx_queue_stop(struct rte_eth_dev *dev, uint16_t rx_queue_id);
 int sonic_dev_tx_queue_start(struct rte_eth_dev *dev, uint16_t tx_queue_id);
 
 int sonic_dev_tx_queue_stop(struct rte_eth_dev *dev, uint16_t tx_queue_id);
+
+uint16_t tx_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts, uint16_t nb_pkts);
+uint16_t rx_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts, uint16_t nb_pkts);
+
+/*
+ * Definitions of all functions exported by connectal.so through the generic
+ * structure *connectal_ops*
+ */
+typedef void (*dma_create_t)(void);
+typedef void (*dma_free_t)(void);
+typedef void (*dma_read_t)(uint64_t base, uint32_t len);
+
+/*
+ * @internal. A structure containing the functions exposed by connectal driver.
+ */
+struct connectal_ops {
+    dma_create_t        dma_create;
+    dma_free_t          dma_free;
+    dma_read_t          dma_read;
+};
 
 #endif /* _SONIC_ETHDEV_H_ */
