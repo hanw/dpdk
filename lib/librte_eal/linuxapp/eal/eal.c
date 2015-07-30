@@ -925,3 +925,15 @@ rte_eal_check_module(const char *module_name)
 
 	return ret;
 }
+
+#define HUGEPG_FMT "%s/%smap_%d"
+void rte_eal_hugepage_path(char *buffer, size_t buflen, int f_id)
+{
+    unsigned int i;
+    for (i=0; i < internal_config.num_hugepage_sizes; i++) {
+        const char *huge_dir = internal_config.hugepage_info[i].hugedir;
+        snprintf(buffer, buflen, HUGEPG_FMT, huge_dir,
+                 internal_config.hugefile_prefix, f_id);
+        buffer[buflen-1] = '\0';
+    }
+}

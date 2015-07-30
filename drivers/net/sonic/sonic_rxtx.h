@@ -71,6 +71,12 @@ struct sonic_tx_queue {
     uint8_t                port_id;  /* device port identifier */
     uint8_t                ctx_curr; /* current used hardware descriptor */
     uint8_t                ctx_start; /* start context position for Tx queue */
+
+    /** ring_queue */
+	struct rte_ring *rng;
+	rte_atomic64_t rx_pkts;
+	rte_atomic64_t tx_pkts;
+	rte_atomic64_t err_pkts;
 };
 
 
@@ -92,6 +98,12 @@ struct sonic_rx_queue {
     uint16_t         nb_rx_desc;    /* number of Rx descriptors */
     uint16_t         queue_id;      /* Rx queue index */
     uint8_t          port_id;       /* Device port identifier */
+
+    /** ring_queue */
+	struct rte_ring *rng;
+	rte_atomic64_t rx_pkts;
+	rte_atomic64_t tx_pkts;
+	rte_atomic64_t err_pkts;
 };
 
 #endif

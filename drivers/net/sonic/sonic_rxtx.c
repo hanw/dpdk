@@ -279,10 +279,12 @@ sonic_dev_rx_queue_setup(struct rte_eth_dev *dev,
     PMD_INIT_LOG(DEBUG, "sw_ring=%p hw_ring=%p, dma_addr=0x%"PRIx64,
                  rxq->sw_ring, rxq->rx_ring, rxq->rx_ring_phys_addr);
 
-    dev->data->rx_queues[queue_idx] = rxq;
-
+    //dev->data->rx_queues[queue_idx] = rxq; //FIXME: dma queue
     sonic_reset_rx_queue(rxq);
 
+    // Loopback queue
+	struct pmd_internals *internals = dev->data->dev_private;
+	dev->data->rx_queues[queue_idx] = &internals->rx_sonic_queues[queue_idx];
     return 0;
 }
 
@@ -340,12 +342,15 @@ sonic_dev_tx_queue_setup(struct rte_eth_dev *dev,
 		sonic_tx_queue_release(txq);
 		return (-ENOMEM);
 	}
-	PMD_INIT_LOG(DEBUG, "sw_ring=%p hw_ring=%p dma_addr=0x%"PRIx64,
-		     txq->sw_ring, txq->tx_ring, txq->tx_ring_phys_addr);
+	PMD_INIT_LOG(DEBUG, "txq=%p, sw_ring=%p hw_ring=%p dma_addr=0x%"PRIx64,
+		         txq, txq->sw_ring, txq->tx_ring, txq->tx_ring_phys_addr);
 
-	dev->data->tx_queues[queue_idx] = txq;
-
+	//dev->data->tx_queues[queue_idx] = txq; //FIXME: To use DMA queue
 	sonic_reset_tx_queue(txq);
+
+    //Loopback queue
+	struct pmd_internals *internals = dev->data->dev_private;
+	dev->data->tx_queues[queue_idx] = &internals->tx_sonic_queues[queue_idx];
 
     return 0;
 }
@@ -435,11 +440,9 @@ eth_sonic_rx_init(struct rte_eth_dev *dev)
     uint16_t i;
     PMD_INIT_FUNC_TRACE();
 
-    dev->rx_pkt_burst = rx_recv_pkts;
     for (i = 0; i < dev->data->nb_rx_queues; i++) {
         // build sglist and send to FPGA
     }
-
     return 0;
 }
 
@@ -460,7 +463,6 @@ eth_sonic_tx_init(struct rte_eth_dev *dev)
         PMD_INIT_LOG(DEBUG, "sw_ring=%p hw_ring=%p dma_addr=0x%"PRIx64,
                  txq->sw_ring, txq->tx_ring, txq->tx_ring_phys_addr);
     }
-
 }
 
 /*
@@ -470,7 +472,15 @@ uint16_t
 rx_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 	     uint16_t nb_pkts)
 {
-	return 0;
+    void **ptrs = (void *)&rx_pkts[0];
+	struct sonic_rx_queue *r = rx_queue;
+	const uint16_t nb_rx = (uint16_t)rte_ring_dequeue_burst(r->rng,
+			ptrs, nb_pkts);
+	if (r->rng->flags & RING_F_SC_DEQ)
+		r->rx_pkts.cnt += nb_rx;
+	else
+		rte_atomic64_add(&(r->rx_pkts), nb_rx);
+	return nb_rx;
 }
 
 /*
@@ -480,6 +490,16 @@ uint16_t
 tx_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
 	     uint16_t nb_pkts)
 {
-    PMD_TX_LOG(DEBUG, "xmit packets");
-	return 0;
+	void **ptrs = (void *)&tx_pkts[0];
+	struct sonic_tx_queue *r = tx_queue;
+	const uint16_t nb_tx = (uint16_t)rte_ring_enqueue_burst(r->rng,
+			ptrs, nb_pkts);
+	if (r->rng->flags & RING_F_SP_ENQ) {
+		r->tx_pkts.cnt += nb_tx;
+		r->err_pkts.cnt += nb_pkts - nb_tx;
+	} else {
+		rte_atomic64_add(&(r->tx_pkts), nb_tx);
+		rte_atomic64_add(&(r->err_pkts), nb_pkts - nb_tx);
+	}
+	return nb_tx;
 }

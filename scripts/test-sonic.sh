@@ -1,6 +1,6 @@
 #!/bin/bash
 
-DEBUG=0
+DEBUG=1
 BUILD=${1:-x86_64-native-linuxapp-gcc}
 COREMASK=${2:-E} # default using cores 0 and 1
 CONNECTALDIR=/home/hwang/dev/sonic-lite
@@ -8,7 +8,7 @@ PROJ=sonic
 JNI_PATH=$CONNECTALDIR/$PROJ/bluesim/jni
 
 if [ $DEBUG -eq 1 ]; then
-GDB=gdb
+GDB="gdb --args"
 else
 GDB="LD_PRELOAD=libSegFault.so SEGFAULT_USE_ALTSTACK=1 SEGFAULT_OUTPUT_NAME=bin/bsimexe-segv-output.txt"
 fi

@@ -231,6 +231,8 @@ static inline int rte_gettid(void)
 	return RTE_PER_LCORE(_thread_id);
 }
 
+void rte_eal_hugepage_path(char* filepath, size_t buflen, int f_id);
+
 #ifdef __cplusplus
 }
 #endif

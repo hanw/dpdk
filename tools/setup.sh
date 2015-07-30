@@ -327,7 +327,7 @@ clear_huge_pages()
 {
 	echo > .echo_tmp
 	for d in /sys/devices/system/node/node? ; do
-		echo "echo 0 > $d/hugepages/hugepages-2048kB/nr_hugepages" >> .echo_tmp
+		echo "echo 0 > $d/hugepages/hugepages-1048576kB/nr_hugepages" >> .echo_tmp
 	done
 	echo "Removing currently reserved hugepages"
 	sudo sh .echo_tmp
@@ -344,13 +344,13 @@ set_non_numa_pages()
 	clear_huge_pages
 
 	echo ""
-	echo "  Input the number of 2MB pages"
-	echo "  Example: to have 128MB of hugepages available, enter '64' to"
-	echo "  reserve 64 * 2MB pages"
+	echo "  Input the number of 1024MB pages"
+	echo "  Example: to have 1024MB of hugepages available, enter '1' to"
+	echo "  reserve 1 * 1024MB pages"
 	echo -n "Number of pages: "
 	read Pages
 
-	echo "echo $Pages > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages" > .echo_tmp
+	echo "echo $Pages > /sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages" > .echo_tmp
 
 	echo "Reserving hugepages"
 	sudo sh .echo_tmp
@@ -367,16 +367,16 @@ set_numa_pages()
 	clear_huge_pages
 
 	echo ""
-	echo "  Input the number of 2MB pages for each node"
-	echo "  Example: to have 128MB of hugepages available per node,"
-	echo "  enter '64' to reserve 64 * 2MB pages on each node"
+	echo "  Input the number of 1024MB pages for each node"
+	echo "  Example: to have 1024MB of hugepages available per node,"
+	echo "  enter '1024' to reserve 1 * 1024MB pages on each node"
 
 	echo > .echo_tmp
 	for d in /sys/devices/system/node/node? ; do
 		node=$(basename $d)
 		echo -n "Number of pages for $node: "
 		read Pages
-		echo "echo $Pages > $d/hugepages/hugepages-2048kB/nr_hugepages" >> .echo_tmp
+		echo "echo $Pages > $d/hugepages/hugepages-1048576kB/nr_hugepages" >> .echo_tmp
 	done
 	echo "Reserving hugepages"
 	sudo sh .echo_tmp

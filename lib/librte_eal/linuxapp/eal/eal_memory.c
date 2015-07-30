@@ -244,6 +244,7 @@ get_virtual_area(size_t *size, size_t hugepage_sz)
 				baseaddr_offset);
 	}
 	else addr = NULL;
+	//RTE_LOG(DEBUG, EAL, "base_virtaddr=%lx addr=%p\n", internal_config.base_virtaddr, addr);
 
 	RTE_LOG(DEBUG, EAL, "Ask a virtual area of 0x%zx bytes\n", *size);
 
@@ -275,12 +276,11 @@ get_virtual_area(size_t *size, size_t hugepage_sz)
 	aligned_addr &= (~(hugepage_sz - 1));
 	addr = (void *)(aligned_addr);
 
-	RTE_LOG(DEBUG, EAL, "Virtual area found at %p (size = 0x%zx)\n",
-		addr, *size);
-
 	/* increment offset */
 	baseaddr_offset += *size;
 
+	RTE_LOG(DEBUG, EAL, "Virtual area found at %p (size = 0x%zx), new offset=0x%zx\n",
+		addr, *size, baseaddr_offset);
 	return addr;
 }
 
@@ -307,6 +307,8 @@ map_all_hugepages(struct hugepage_file *hugepg_tbl,
 
 	for (i = 0; i < hpi->num_pages[0]; i++) {
 		uint64_t hugepage_sz = hpi->hugepage_sz;
+       // RTE_LOG(DEBUG, EAL, "%d: physaddr=0x%lx\n", i, hugepg_tbl[i].physaddr);
+        //RTE_LOG(DEBUG, EAL, "<---vma_addr=%p, vma_len=%lx\n", vma_addr, vma_len);
 
 		if (orig) {
 			hugepg_tbl[i].file_id = i;
@@ -366,6 +368,7 @@ map_all_hugepages(struct hugepage_file *hugepg_tbl,
 		}
 #endif
 
+        printf("filepath=%s\n", hugepg_tbl[i].filepath);
 		/* try to create hugepage file */
 		fd = open(hugepg_tbl[i].filepath, O_CREAT | O_RDWR, 0755);
 		if (fd < 0) {
@@ -376,6 +379,8 @@ map_all_hugepages(struct hugepage_file *hugepg_tbl,
 
 		virtaddr = mmap(vma_addr, hugepage_sz, PROT_READ | PROT_WRITE,
 				MAP_SHARED, fd, 0);
+
+        RTE_LOG(DEBUG, EAL, "creates virtual mapping %p\n", virtaddr);
 		if (virtaddr == MAP_FAILED) {
 			RTE_LOG(ERR, EAL, "%s(): mmap failed: %s\n", __func__,
 					strerror(errno));
@@ -403,6 +408,7 @@ map_all_hugepages(struct hugepage_file *hugepg_tbl,
 
 		vma_addr = (char *)vma_addr + hugepage_sz;
 		vma_len -= hugepage_sz;
+        //RTE_LOG(DEBUG, EAL, "-->vma_addr=%p, vma_len=%lx\n", vma_addr, vma_len);
 	}
 	return 0;
 }
@@ -427,6 +433,7 @@ remap_all_hugepages(struct hugepage_file *hugepg_tbl, struct hugepage_info *hpi)
 
 	while (i < hpi->num_pages[0]) {
 
+        RTE_LOG(DEBUG, EAL, "remap_all_hugepage\n");
 #ifndef RTE_ARCH_64
 		/* for 32-bit systems, don't remap 1G pages and 16G pages,
 		 * just reuse original map address as final map address.
@@ -723,6 +730,9 @@ sort_by_physaddr(struct hugepage_file *hugepg_tbl, struct hugepage_info *hpi)
 			sizeof(struct hugepage_file));
 		memcpy(&hugepg_tbl[i], &tmp, sizeof(struct hugepage_file));
 	}
+    //for (i=0; i< hpi->num_pages[0]; i++) {
+    //    RTE_LOG(DEBUG, EAL, "physaddr=0x%lx pgsize=0x%lx\n", hugepg_tbl[i].physaddr, hugepg_tbl[i].size);
+    //}
 	return 0;
 }
 
@@ -1126,6 +1136,7 @@ rte_eal_hugepage_init(void)
 			continue;
 
 		/* map all hugepages available */
+        RTE_LOG(DEBUG, EAL, "Map all hugepages %d\n", i);
 		if (map_all_hugepages(&tmp_hp[hp_offset], hpi, 1) < 0){
 			RTE_LOG(DEBUG, EAL, "Failed to mmap %u MB hugepages\n",
 					(unsigned)(hpi->hugepage_sz / 0x100000));
@@ -1161,6 +1172,7 @@ rte_eal_hugepage_init(void)
 		hp_offset += new_pages_count[i];
 #else
 		/* remap all hugepages */
+        RTE_LOG(DEBUG, EAL, "Remap all huge pages again %d\n", i);
 		if (map_all_hugepages(&tmp_hp[hp_offset], hpi, 0) < 0){
 			RTE_LOG(DEBUG, EAL, "Failed to remap %u MB pages\n",
 					(unsigned)(hpi->hugepage_sz / 0x100000));
@@ -1416,6 +1428,7 @@ rte_eal_hugepage_attach(void)
 		RTE_LOG(ERR, EAL, "Could not open %s\n", eal_hugepage_info_path());
 		goto error;
 	}
+    printf("%s\n", eal_hugepage_info_path());
 
 	/* map all segments into memory to make sure we get the addrs */
 	for (s = 0; s < RTE_MAX_MEMSEG; ++s) {
@@ -1591,3 +1604,4 @@ rte_eal_memory_init(void)
 
 	return 0;
 }
+

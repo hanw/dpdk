@@ -215,7 +215,7 @@ pkt_burst_transmit(struct fwd_stream *fs)
 	start_tsc = rte_rdtsc();
 #endif
 
-    printf("burst txonly\n");
+    RTE_LOG(DEBUG, PMD, "%s: %d\n", __func__, __LINE__);
 	mbp = current_fwd_lcore()->mbp;
 	txp = &ports[fs->tx_port];
 	vlan_tci = txp->tx_vlan_id;

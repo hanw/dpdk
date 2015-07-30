@@ -20,6 +20,7 @@
  */
 
 #include <sys/queue.h>
+#include <sys/file.h>
 #include <stdio.h>
 #include <errno.h>
 #include <stdint.h>
@@ -61,27 +62,46 @@
 #include "sonic_logs.h"
 
 static struct connectal_ops cops = {
-    .dma_create        = NULL,
-    .dma_free          = NULL,
-    .dma_read          = NULL,
+    .dma_init          = NULL,
+    .tx_send_pa        = NULL,
+    .rx_send_pa        = NULL,
 };
+static const char *connectal_so = "connectal.so";
 
-struct pmd_internals {
-	unsigned packet_size;
-	unsigned numa_node;
+static int
+connectal_init(struct connectal_ops *ops)
+{
+    PMD_INIT_FUNC_TRACE();
+    void * handle;
+    handle = dlopen(connectal_so, RTLD_LAZY); //FIXME: refcnt
+    if (!handle) {
+        rte_exit(EXIT_FAILURE, "Unable to find %s\n", connectal_so);
+    }
 
-	unsigned nb_rx_queues;
-	unsigned nb_tx_queues;
+    ops->dma_init = dlsym(handle, "dma_init");
+    if (ops->dma_init == NULL)
+        goto error;
 
-	struct sonic_rx_queue rx_sonic_queues[1];
-	struct sonic_tx_queue tx_sonic_queues[1];
+    ops->tx_send_pa = dlsym(handle, "tx_send_pa");
+    if (ops->tx_send_pa == NULL)
+        goto error;
 
-    struct connectal_ops *cops;
+    ops->rx_send_pa = dlsym(handle, "rx_send_pa");
+    if (ops->rx_send_pa == NULL)
+        goto error;
+
+    return 0;
+error:
+    rte_exit(EXIT_FAILURE, "Unable to load symbol\n");
+}
+
+enum dev_action{
+	DEV_CREATE,
+	DEV_ATTACH
 };
 
 static struct ether_addr eth_addr = { .addr_bytes = {0} };
 static const char *drivername = "SONIC PMD";
-static const char *soname = "connectal.so";
 static struct rte_eth_link pmd_link = {
 	.link_speed = 10000,
 	.link_duplex = ETH_LINK_FULL_DUPLEX,
@@ -108,9 +128,6 @@ static void sonic_dev_info_get(struct rte_eth_dev *dev,
 static int sonic_dev_link_update(struct rte_eth_dev *dev __rte_unused,
             int wait_to_complete __rte_unused);
 
-/* bsim */
-static void * so_handle;
-void (*dma_create) (void);
 
 static const struct eth_dev_ops ops = {
 	.dev_configure        = sonic_dev_configure,
@@ -136,46 +153,20 @@ static const struct eth_dev_ops ops = {
 };
 
 static int
-connectal_init(struct connectal_ops *ops)
-{
-    PMD_INIT_FUNC_TRACE();
-    so_handle = dlopen(soname, RTLD_LAZY);
-    if (!so_handle) {
-        rte_exit(EXIT_FAILURE, "Unable to find %s\n", soname);
-    }
-
-    ops->dma_create = dlsym(so_handle, "dma_create");
-    PMD_INIT_FUNC_TRACE();
-    if (ops->dma_create == NULL)
-        goto error;
-
-    ops->dma_free = dlsym(so_handle, "dma_free");
-    PMD_INIT_FUNC_TRACE();
-    if (ops->dma_free == NULL)
-        goto error;
-
-    ops->dma_read = dlsym(so_handle, "dma_read");
-    PMD_INIT_FUNC_TRACE();
-    if (ops->dma_read == NULL)
-        goto error;
-
-    return 0;
-error:
-    rte_exit(EXIT_FAILURE, "Unable to load symbol\n");
-}
-
-static int
 sonic_dev_configure(struct rte_eth_dev *dev)
 {
     PMD_INIT_FUNC_TRACE();
+    char filepath[128];
 	struct pmd_internals *internals;
 	if (dev == NULL)
 		return;
 	internals = dev->data->dev_private;
 
-    if (internals->cops->dma_create)
-        (internals->cops->dma_create)();
-
+    rte_eal_hugepage_path(filepath, sizeof(filepath), 0);
+    int fd = open(filepath, O_CREAT | O_RDWR, 0666);
+    if (internals->cops->dma_init) {
+        (internals->cops->dma_init)(fd);
+    }
     return 0;
 }
 
@@ -235,12 +226,41 @@ static void
 sonic_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 {
     PMD_INIT_FUNC_TRACE();
+	unsigned i;
+	unsigned long rx_total = 0, tx_total = 0, tx_err_total = 0;
+	const struct pmd_internals *internal = dev->data->dev_private;
+
+	for (i = 0; i < RTE_ETHDEV_QUEUE_STAT_CNTRS &&
+			i < internal->nb_rx_queues; i++) {
+		stats->q_ipackets[i] = internal->rx_sonic_queues[i].rx_pkts.cnt;
+		rx_total += stats->q_ipackets[i];
+	}
+
+	for (i = 0; i < RTE_ETHDEV_QUEUE_STAT_CNTRS &&
+			i < internal->nb_tx_queues; i++) {
+		stats->q_opackets[i] = internal->tx_sonic_queues[i].tx_pkts.cnt;
+		stats->q_errors[i] = internal->tx_sonic_queues[i].err_pkts.cnt;
+		tx_total += stats->q_opackets[i];
+		tx_err_total += stats->q_errors[i];
+	}
+
+	stats->ipackets = rx_total;
+	stats->opackets = tx_total;
+	stats->oerrors = tx_err_total;
 }
 
 static void
 sonic_dev_stats_reset(struct rte_eth_dev *dev)
 {
     PMD_INIT_FUNC_TRACE();
+	unsigned i;
+	struct pmd_internals *internal = dev->data->dev_private;
+	for (i = 0; i < internal->nb_rx_queues; i++)
+		internal->rx_sonic_queues[i].rx_pkts.cnt = 0;
+	for (i = 0; i < internal->nb_tx_queues; i++) {
+		internal->tx_sonic_queues[i].tx_pkts.cnt = 0;
+		internal->tx_sonic_queues[i].err_pkts.cnt = 0;
+	}
 }
 
 static void
@@ -271,22 +291,24 @@ sonic_dev_link_update(struct rte_eth_dev *dev __rte_unused,
 }
 
 static int
-eth_dev_sonic_create(const char *name,
-		const unsigned numa_node,
-		unsigned packet_size)
+rte_sonic_pmd_init(const char *name, const char *params)
 {
-	const unsigned nb_rx_queues = 1;
-	const unsigned nb_tx_queues = 1;
+	PMD_INIT_FUNC_TRACE();
+    const unsigned nb_rx_queues = 1;
+    const unsigned nb_tx_queues = 1;
 	struct rte_eth_dev_data *data = NULL;
 	struct rte_pci_device *pci_dev = NULL;
 	struct pmd_internals *internals = NULL;
 	struct rte_eth_dev *eth_dev = NULL;
+    unsigned i;
+	unsigned numa_node;
+	unsigned packet_size = 64;
+	int ret;
 
 	if (name == NULL)
 		return -EINVAL;
 
-	RTE_LOG(INFO, PMD, "Creating sonic ethdev on numa socket %u\n",
-			numa_node);
+	numa_node = rte_socket_id();
 
 	/* now do all data allocation - for eth_dev structure, dummy pci driver
 	 * and internal (private) data
@@ -322,6 +344,28 @@ eth_dev_sonic_create(const char *name,
 	internals->packet_size = packet_size;
 	internals->numa_node = numa_node;
 
+	/* rx and tx are so-called from point of view of first port.
+	 * They are inverted from the point of view of second port
+	 */
+	struct rte_ring *rxtx[RTE_PMD_RING_MAX_RX_RINGS];
+	char rng_name[RTE_RING_NAMESIZE];
+	unsigned num_rings = RTE_MIN(RTE_PMD_RING_MAX_RX_RINGS,
+			RTE_PMD_RING_MAX_TX_RINGS);
+
+	for (i = 0; i < num_rings; i++) {
+		snprintf(rng_name, sizeof(rng_name), "ETH_RXTX%u_%s", i, name);
+		rxtx[i] = rte_ring_create(rng_name, 1024, numa_node,
+						          RING_F_SP_ENQ|RING_F_SC_DEQ);
+		if (rxtx[i] == NULL)
+			return -1;
+	}
+	for (i = 0; i < nb_rx_queues; i++) {
+		internals->rx_sonic_queues[i].rng = rxtx[i];
+	}
+	for (i = 0; i < nb_tx_queues; i++) {
+		internals->tx_sonic_queues[i].rng = rxtx[i];
+	}
+
     /* load connectal.so */
     connectal_init(&cops);
     internals->cops = &cops;
@@ -345,6 +389,7 @@ eth_dev_sonic_create(const char *name,
     eth_dev->rx_pkt_burst = &rx_recv_pkts;
     eth_dev->tx_pkt_burst = &tx_xmit_pkts;
 
+    PMD_INIT_LOG(DEBUG, "Created ethdev->data at %p\n", internals);
 	return 0;
 
 error:
@@ -353,24 +398,6 @@ error:
 	rte_free(internals);
 
 	return -1;
-}
-
-static int
-rte_sonic_pmd_init(const char *name, const char *params)
-{
-	unsigned numa_node;
-	unsigned packet_size = 64;
-	int ret;
-
-	if (name == NULL)
-		return -EINVAL;
-
-	PMD_INIT_FUNC_TRACE();
-
-	numa_node = rte_socket_id();
-
-    //FIXME rte_eth_driver_register, move sonic_create to driver init function
-	ret = eth_dev_sonic_create(name, numa_node, packet_size);
 }
 
 static int
