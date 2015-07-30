@@ -164,6 +164,18 @@ sonic_dev_configure(struct rte_eth_dev *dev)
 
     rte_eal_hugepage_path(filepath, sizeof(filepath), 0);
     int fd = open(filepath, O_CREAT | O_RDWR, 0666);
+
+    char *map = mmap(0, 1ULL << 30, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (map == MAP_FAILED) {
+        close(fd);
+        perror("Error mmaping the file");
+        exit(EXIT_FAILURE);
+    }
+
+    for (size_t i = 0; i < 1ULL << 30; i++) {
+        map[i] = 0xAAAA;
+    }
+
     if (internals->cops->dma_init) {
         (internals->cops->dma_init)(fd);
     }
