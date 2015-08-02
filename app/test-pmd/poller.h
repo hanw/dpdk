@@ -32,6 +32,8 @@ struct PortalPoller {
     int stopping;
 };
 
+extern struct PortalPoller *poller;
+
 void poller_init(struct PortalPoller *poller, int numa_node);
 void poller_addFd(struct PortalPoller *poller, int fd);
 

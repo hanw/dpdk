@@ -78,6 +78,7 @@
 
 #include "testpmd.h"
 #include "mempool_osdep.h"
+#include "poller.h"
 
 uint16_t verbose_level = 0; /**< Silent by default. */
 
@@ -1973,6 +1974,15 @@ init_port(void)
 		ports[pid].enabled = 1;
 }
 
+static void
+setup_shared_poller(int numa_node)
+{
+    poller = rte_zmalloc_socket("name", sizeof(*poller), 0, numa_node);
+    if (poller == NULL)
+        rte_panic("Cannot alloc poller\n");
+    poller_init(poller, numa_node);
+}
+
 int
 main(int argc, char** argv)
 {
@@ -1989,6 +1999,9 @@ main(int argc, char** argv)
 
 	/* allocate port structures, and init them */
 	init_port();
+
+    /* setup shared poller */
+    setup_shared_poller(0); //FIXME: assume socket 0
 
 	set_def_fwd_config();
 	if (nb_lcores == 0)

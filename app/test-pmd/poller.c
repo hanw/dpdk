@@ -18,41 +18,56 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
+#ifndef __POLLER_H__
+#define __POLLER_H__
+
 #include <string.h>
 #include <poll.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #include <rte_log.h>
+#include <rte_malloc.h>
 #include <rte_memory.h>
 
-#include "sonic_poller.h"
+#include "poller.h"
 #include "portal.h"
+
+struct PortalPoller *poller = 0;
 
 void poller_init(struct PortalPoller *poller, int numa_node) {
 
     int rc = pipe(poller->pipefd);
+    RTE_LOG(DEBUG, PMD, "[%s:%d] poller %p fd=%d, rc=%d\n", __FUNCTION__, __LINE__, poller, poller->pipefd[0], rc);
     if (rc != 0)
         RTE_LOG(ERR, PMD, "[%s:%d] pipe error %d:%s\n", __FUNCTION__, __LINE__, errno, strerror(errno));
 
     fcntl(poller->pipefd[0], F_SETFL, O_NONBLOCK);
     poller->timeout = -1; //BSIM uses 100
     poller->numa_node = numa_node;
-//    poller_addFd(poller, poller->pipefd[0]);
+    poller_addFd(poller, poller->pipefd[0]);
 }
 
 /**
  * assumes holding mutex by caller.
  */
-/*
+
 void poller_addFd(struct PortalPoller *poller, int fd) {
+    RTE_LOG(DEBUG, PMD, "[%s:%d] poller %p fd=%d\n", __FUNCTION__, __LINE__, poller, fd);
     poller->numFds ++;
-    poller->portal_fds = rte_realloc(poller->portal_fds, sizeof(struct pollfd) * poller->numFds, RTE_CACHE_LINE_SIZE);
+    poller->portal_fds = rte_realloc((void*)poller->portal_fds, sizeof(struct pollfd) * poller->numFds, RTE_CACHE_LINE_SIZE);
+    RTE_LOG(DEBUG, PMD, "[%s:%d] portal_fds=%p numFds=%d\n", __FUNCTION__, __LINE__, poller->portal_fds, poller->numFds);
+
     struct pollfd *pollfd = &poller->portal_fds[poller->numFds-1];
+
+    return;
+    RTE_LOG(DEBUG, PMD, "[%s:%d] pollfd %p numFds=%d\n", __FUNCTION__, __LINE__, pollfd, poller->numFds);
     pollfd->fd = fd;
     pollfd->events = POLLIN;
 }
 
+/*
 void* poller_event(struct PortalPoller *poller) {
     uint8_t ch;
     size_t rc = read(poller->pipefd[0], &ch, 1);
@@ -71,3 +86,4 @@ void* poller_event(struct PortalPoller *poller) {
 }
 */
 
+#endif

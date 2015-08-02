@@ -61,7 +61,6 @@
 #include "sonic_rxtx.h"
 #include "sonic_ethdev.h"
 #include "sonic_logs.h"
-#include "sonic_poller.h"
 
 #define LENGTH (1024UL * 1024 * 1024)
 
@@ -80,7 +79,7 @@ connectal_init(struct connectal_ops *ops)
     void * handle;
     handle = dlopen(connectal_so, RTLD_LAZY); //FIXME: refcnt
     if (!handle) {
-        rte_exit(EXIT_FAILURE, "Unable to find %s\n", connectal_so);
+        rte_exit(EXIT_FAILURE, "%s\n", dlerror());
     }
 
     ops->dma_init = dlsym(handle, "dma_init");
@@ -321,7 +320,6 @@ rte_sonic_pmd_init(const char *name, const char *params)
 	struct rte_pci_device *pci_dev = NULL;
 	struct pmd_internals *internals = NULL;
 	struct rte_eth_dev *eth_dev = NULL;
-	struct PortalPoller *poller = NULL;
     unsigned i;
 	unsigned numa_node;
 	unsigned packet_size = 64;
@@ -366,11 +364,6 @@ rte_sonic_pmd_init(const char *name, const char *params)
 	internals->packet_size = packet_size;
 	internals->numa_node = numa_node;
 
-    poller = rte_zmalloc_socket("name", sizeof(*poller), 0, numa_node);
-    if (poller == NULL)
-        goto error;
-    //poller_init(poller, numa_node);
-    //internals->poller = poller;
 	/* rx and tx are so-called from point of view of first port.
 	 * They are inverted from the point of view of second port
 	 */
@@ -416,7 +409,7 @@ rte_sonic_pmd_init(const char *name, const char *params)
     eth_dev->rx_pkt_burst = &rx_recv_pkts;
     eth_dev->tx_pkt_burst = &tx_xmit_pkts;
 
-    PMD_INIT_LOG(DEBUG, "Created ethdev->data at %p\n", internals);
+    PMD_INIT_LOG(DEBUG, "Created ethdev->data at %p", internals);
 	return 0;
 
 error:

@@ -33,6 +33,14 @@ include $(RTE_SDK)/mk/rte.vars.mk
 
 ifeq ($(CONFIG_RTE_TEST_PMD),y)
 
+ifndef SONIC_INCLUDE
+    $(error SONIC_INCLUDE is undefined, should point to generated /jni directory)
+endif
+ifndef CONNECTAL_INCLUDE
+    $(error CONNECTAL_INCLUDE is undefined, should point to <CONNECTAL>/cpp directory)
+endif
+
+
 #
 # library name
 #
@@ -42,6 +50,8 @@ CFLAGS += -O3
 CFLAGS += $(WERROR_FLAGS)
 CFLAGS += $(CONNECTAL_CXXFLAGS)
 
+CFLAGS += -I $(CONNECTAL_INCLUDE)
+CFLAGS += -I $(SONIC_INCLUDE)
 #
 # all source are stored in SRCS-y
 #
@@ -60,6 +70,7 @@ SRCS-y += csumonly.c
 SRCS-y += icmpecho.c
 SRCS-$(CONFIG_RTE_LIBRTE_IEEE1588) += ieee1588fwd.c
 SRCS-y += mempool_anon.c
+SRCS-y += poller.c
 
 ifeq ($(CONFIG_RTE_EXEC_ENV_LINUXAPP),y)
 CFLAGS_mempool_anon.o := -D_GNU_SOURCE

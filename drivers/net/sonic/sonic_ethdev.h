@@ -34,7 +34,6 @@ struct pmd_internals {
 	struct sonic_tx_queue tx_sonic_queues[1];
 
     struct connectal_ops *cops;
-    struct PortalPoller *poller;
 };
 
 /*
