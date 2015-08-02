@@ -19,6 +19,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 #ifndef __SONIC_RXTX_H__
+#define __SONIC_RXTX_H__
 
 typedef uint64_t	u64;
 typedef uint32_t	u32;
@@ -91,13 +92,13 @@ struct sonic_rx_queue {
 
     struct rte_mempool *mb_pool;    /* mbuf pool to populate Rx ring */
     volatile union sonic_rx_desc *rx_ring; /* Rx ring virtual address */
-    uint64_t            rx_ring_phys_addr; /* Rx ring DMA address */
+    uint64_t         rx_ring_phys_addr; /* Rx ring DMA address */
     struct sonic_rx_entry *sw_ring; /* adddress of Rx software ring */
-    struct rte_mbuf *pkt_first_seg; /* First segment of current packet */
-    struct rte_mbuf *pkt_last_seg;  /* Last segment of current packet */
     uint16_t         nb_rx_desc;    /* number of Rx descriptors */
     uint16_t         queue_id;      /* Rx queue index */
     uint8_t          port_id;       /* Device port identifier */
+
+	struct rte_eth_dev *dev; /* pointer to parent dev */
 
     /** ring_queue */
 	struct rte_ring *rng;

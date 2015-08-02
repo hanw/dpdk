@@ -47,6 +47,7 @@ LIBABIVER := 1
 #
 SRCS-$(CONFIG_RTE_LIBRTE_SONIC_PMD) += sonic_rxtx.c
 SRCS-$(CONFIG_RTE_LIBRTE_SONIC_PMD) += sonic_ethdev.c
+SRCS-$(CONFIG_RTE_LIBRTE_SONIC_PMD) += sonic_poller.c
 
 # this lib depends upon:
 DEPDIRS-$(CONFIG_RTE_LIBRTE_SONIC_PMD) += lib/librte_eal lib/librte_ether

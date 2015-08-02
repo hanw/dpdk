@@ -305,10 +305,10 @@ map_all_hugepages(struct hugepage_file *hugepg_tbl,
 	RTE_SET_USED(vma_len);
 #endif
 
+    RTE_LOG(DEBUG, EAL, "[%s:%d] orig=%d, pagesize=0x%lx, nb_hugepg=%d\n", __func__, __LINE__, orig, hpi->hugepage_sz, hpi->num_pages[0]);
+    //INITIALLY, all hugepages are on socket 0.
 	for (i = 0; i < hpi->num_pages[0]; i++) {
 		uint64_t hugepage_sz = hpi->hugepage_sz;
-       // RTE_LOG(DEBUG, EAL, "%d: physaddr=0x%lx\n", i, hugepg_tbl[i].physaddr);
-        //RTE_LOG(DEBUG, EAL, "<---vma_addr=%p, vma_len=%lx\n", vma_addr, vma_len);
 
 		if (orig) {
 			hugepg_tbl[i].file_id = i;
@@ -368,7 +368,7 @@ map_all_hugepages(struct hugepage_file *hugepg_tbl,
 		}
 #endif
 
-        printf("filepath=%s\n", hugepg_tbl[i].filepath);
+        RTE_LOG(DEBUG, EAL, "hugepg_tbl[%d].filepath=%s, physaddr=0x%lx\n", i, hugepg_tbl[i].filepath, hugepg_tbl[i].physaddr);
 		/* try to create hugepage file */
 		fd = open(hugepg_tbl[i].filepath, O_CREAT | O_RDWR, 0755);
 		if (fd < 0) {
@@ -408,7 +408,6 @@ map_all_hugepages(struct hugepage_file *hugepg_tbl,
 
 		vma_addr = (char *)vma_addr + hugepage_sz;
 		vma_len -= hugepage_sz;
-        //RTE_LOG(DEBUG, EAL, "-->vma_addr=%p, vma_len=%lx\n", vma_addr, vma_len);
 	}
 	return 0;
 }
@@ -541,6 +540,7 @@ remap_all_hugepages(struct hugepage_file *hugepg_tbl, struct hugepage_info *hpi)
 				filepath);
 
 		physaddr = rte_mem_virt2phy(vma_addr);
+        RTE_LOG(DEBUG, EAL, "[%s:%d] physaddr=%p\n", __func__, __LINE__, physaddr);
 
 		if (physaddr == RTE_BAD_PHYS_ADDR)
 			return -1;
@@ -745,7 +745,6 @@ create_shared_memory(const char *filename, const size_t mem_size)
 {
 	void *retval;
 	int fd = open(filename, O_CREAT | O_RDWR, 0666);
-    fprintf(stderr, "create_shared_memory %s\n", filename);
 	if (fd < 0)
 		return NULL;
 	if (ftruncate(fd, mem_size) < 0) {
@@ -1137,7 +1136,6 @@ rte_eal_hugepage_init(void)
 			continue;
 
 		/* map all hugepages available */
-        RTE_LOG(DEBUG, EAL, "Map all hugepages %d\n", i);
 		if (map_all_hugepages(&tmp_hp[hp_offset], hpi, 1) < 0){
 			RTE_LOG(DEBUG, EAL, "Failed to mmap %u MB hugepages\n",
 					(unsigned)(hpi->hugepage_sz / 0x100000));
@@ -1173,7 +1171,6 @@ rte_eal_hugepage_init(void)
 		hp_offset += new_pages_count[i];
 #else
 		/* remap all hugepages */
-        RTE_LOG(DEBUG, EAL, "Remap all huge pages again %d\n", i);
 		if (map_all_hugepages(&tmp_hp[hp_offset], hpi, 0) < 0){
 			RTE_LOG(DEBUG, EAL, "Failed to remap %u MB pages\n",
 					(unsigned)(hpi->hugepage_sz / 0x100000));
@@ -1253,6 +1250,7 @@ rte_eal_hugepage_init(void)
 	}
 
 	/* create shared memory */
+    RTE_LOG(DEBUG, EAL, "shared memory to store hugepage file map%s\n", eal_hugepage_info_path());
 	hugepage = create_shared_memory(eal_hugepage_info_path(),
 			nr_hugefiles * sizeof(struct hugepage_file));
 
@@ -1429,7 +1427,7 @@ rte_eal_hugepage_attach(void)
 		RTE_LOG(ERR, EAL, "Could not open %s\n", eal_hugepage_info_path());
 		goto error;
 	}
-    printf("%s\n", eal_hugepage_info_path());
+    RTE_LOG(DEBUG, EAL, "hugepage_info path=%s\n", eal_hugepage_info_path());
 
 	/* map all segments into memory to make sure we get the addrs */
 	for (s = 0; s < RTE_MAX_MEMSEG; ++s) {
@@ -1606,3 +1604,37 @@ rte_eal_memory_init(void)
 	return 0;
 }
 
+/* find all mmap'd huge pages, print va and pa*/
+uint64_t
+get_base_phys_addr(void)
+{
+    const struct rte_mem_config *mcfg = rte_eal_get_configuration()->mem_config;
+    const struct hugepage_file *hp=NULL;
+    unsigned num_hp = 0;
+    unsigned i, s;
+    int fd_hugepage=-1;
+    off_t size;
+    fd_hugepage = open(eal_hugepage_info_path(), O_RDONLY);
+    size = getFileSize(fd_hugepage);
+    hp = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd_hugepage, 0);
+    num_hp = size / sizeof(struct hugepage_file);
+
+    s=0;
+    uint64_t phys_addr;
+    while(s < RTE_MAX_MEMSEG && mcfg->memseg[s].len>0) {
+        uintptr_t offset=0;
+        void *base_addr;
+        size_t mapping_size;
+
+        base_addr = mcfg->memseg[s].addr;
+        for (i = 0; i < num_hp; i++){
+            mapping_size = hp[i].size;
+            phys_addr = hp[i].physaddr;
+            offset+=mapping_size;
+            RTE_LOG(DEBUG, EAL, "phys_addr=0x%lx, base_addr=%p, mapping_size=%lx, offset=%lx\n", phys_addr, base_addr, mapping_size, offset);
+        }
+        s++;
+    }
+
+    return phys_addr;
+}

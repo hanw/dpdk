@@ -202,9 +202,6 @@ sonic_reset_rx_queue(struct sonic_rx_queue *rxq)
 		rxq->rx_ring[i] = zeroed_desc;
 	}
 
-	//rxq->rx_tail = 0;
-	rxq->pkt_first_seg = NULL;
-	rxq->pkt_last_seg = NULL;
 }
 
 static void
@@ -256,9 +253,9 @@ sonic_dev_rx_queue_setup(struct rte_eth_dev *dev,
     }
 
     /*
-	 * Zero init all the descriptors in the ring.
-	 */
-	memset (rz->addr, 0, size);
+     * Zero init all the descriptors in the ring.
+     */
+    memset (rz->addr, 0, size);
 
     rxq->rx_ring_phys_addr = (uint64_t)rz->phys_addr;
     rxq->rx_ring = (union sonic_rx_desc *)rz->addr;
@@ -283,8 +280,10 @@ sonic_dev_rx_queue_setup(struct rte_eth_dev *dev,
     sonic_reset_rx_queue(rxq);
 
     // Loopback queue
-	struct pmd_internals *internals = dev->data->dev_private;
-	dev->data->rx_queues[queue_idx] = &internals->rx_sonic_queues[queue_idx];
+    struct pmd_internals *internals = dev->data->dev_private;
+    dev->data->rx_queues[queue_idx] = &internals->rx_sonic_queues[queue_idx];
+
+    rxq->dev = dev;
     return 0;
 }
 
@@ -302,6 +301,7 @@ sonic_dev_tx_queue_setup(struct rte_eth_dev *dev,
     PMD_INIT_FUNC_TRACE();
     /* Get access to connectal via so */
 
+    PMD_INIT_LOG(DEBUG, "Create TX Queue at Socket %d", socket_id);
 	/* Free memory prior to re-allocation if needed */
 	if (dev->data->tx_queues[queue_idx] != NULL) {
 		sonic_tx_queue_release(dev->data->tx_queues[queue_idx]);
@@ -472,6 +472,10 @@ uint16_t
 rx_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 	     uint16_t nb_pkts)
 {
+    /**
+     * Poller check if there is any indication
+     */
+
     void **ptrs = (void *)&rx_pkts[0];
 	struct sonic_rx_queue *r = rx_queue;
 	const uint16_t nb_rx = (uint16_t)rte_ring_dequeue_burst(r->rng,

@@ -21,6 +21,7 @@
 
 #include <sys/queue.h>
 #include <sys/file.h>
+#include <sys/mman.h>
 #include <stdio.h>
 #include <errno.h>
 #include <stdint.h>
@@ -60,11 +61,15 @@
 #include "sonic_rxtx.h"
 #include "sonic_ethdev.h"
 #include "sonic_logs.h"
+#include "sonic_poller.h"
+
+#define LENGTH (1024UL * 1024 * 1024)
 
 static struct connectal_ops cops = {
     .dma_init          = NULL,
     .tx_send_pa        = NULL,
     .rx_send_pa        = NULL,
+    .read_version      = NULL,
 };
 static const char *connectal_so = "connectal.so";
 
@@ -88,6 +93,10 @@ connectal_init(struct connectal_ops *ops)
 
     ops->rx_send_pa = dlsym(handle, "rx_send_pa");
     if (ops->rx_send_pa == NULL)
+        goto error;
+
+    ops->read_version = dlsym(handle, "read_version");
+    if (ops->read_version == NULL)
         goto error;
 
     return 0;
@@ -163,21 +172,21 @@ sonic_dev_configure(struct rte_eth_dev *dev)
 	internals = dev->data->dev_private;
 
     rte_eal_hugepage_path(filepath, sizeof(filepath), 0);
-    int fd = open(filepath, O_CREAT | O_RDWR, 0666);
+    int fd = open(filepath, O_CREAT | O_RDWR, 0755);
 
-    char *map = mmap(0, 1ULL << 30, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (map == MAP_FAILED) {
-        close(fd);
-        perror("Error mmaping the file");
-        exit(EXIT_FAILURE);
-    }
+    void *va = NULL;
+    va = rte_zmalloc("dummy", 1000, 8);
+    phys_addr_t pa = rte_malloc_virt2phy(va);
+    fprintf(stderr, "va=%p, pa=0x%lx\n", va, pa);
 
-    for (size_t i = 0; i < 1ULL << 30; i++) {
-        map[i] = 0xAAAA;
-    }
+    uint64_t base_pa = get_base_phys_addr();
+
+    uint64_t offset = pa - base_pa;
+    fprintf(stderr, "offset=0x%lx\n", offset);
 
     if (internals->cops->dma_init) {
         (internals->cops->dma_init)(fd);
+        internals->cops->read_version();
     }
     return 0;
 }
@@ -312,6 +321,7 @@ rte_sonic_pmd_init(const char *name, const char *params)
 	struct rte_pci_device *pci_dev = NULL;
 	struct pmd_internals *internals = NULL;
 	struct rte_eth_dev *eth_dev = NULL;
+	struct PortalPoller *poller = NULL;
     unsigned i;
 	unsigned numa_node;
 	unsigned packet_size = 64;
@@ -356,6 +366,11 @@ rte_sonic_pmd_init(const char *name, const char *params)
 	internals->packet_size = packet_size;
 	internals->numa_node = numa_node;
 
+    poller = rte_zmalloc_socket("name", sizeof(*poller), 0, numa_node);
+    if (poller == NULL)
+        goto error;
+    //poller_init(poller, numa_node);
+    //internals->poller = poller;
 	/* rx and tx are so-called from point of view of first port.
 	 * They are inverted from the point of view of second port
 	 */

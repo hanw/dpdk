@@ -19,6 +19,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 #ifndef _SONIC_ETHDEV_H_
+#define _SONIC_ETHDEV_H_
 
 #include "sonic_logs.h"
 
@@ -33,6 +34,7 @@ struct pmd_internals {
 	struct sonic_tx_queue tx_sonic_queues[1];
 
     struct connectal_ops *cops;
+    struct PortalPoller *poller;
 };
 
 /*
@@ -70,6 +72,7 @@ uint16_t rx_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts, uint16_t nb_pkt
 typedef void (*dma_init_t)(uint32_t fd);
 typedef void (*tx_send_pa_t)(uint64_t base, uint32_t len);
 typedef void (*rx_send_pa_t)(uint64_t base, uint32_t len);
+typedef void (*read_version_t)(void);
 
 /*
  * @internal. A structure containing the functions exposed by connectal driver.
@@ -78,6 +81,7 @@ struct connectal_ops {
     dma_init_t        dma_init;
     tx_send_pa_t      tx_send_pa;
     rx_send_pa_t      rx_send_pa;
+    read_version_t    read_version;
 };
 
 #endif /* _SONIC_ETHDEV_H_ */
