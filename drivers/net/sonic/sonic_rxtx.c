@@ -476,8 +476,7 @@ rx_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 {
     void **ptrs = (void *)&rx_pkts[0];
 	struct sonic_rx_queue *r = rx_queue;
-    if (connectal)
-        connectal->poll();
+    connectal->poll();
 	return 0;
 }
 
@@ -499,8 +498,7 @@ tx_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
         buf_dma_addr = RTE_MBUF_DATA_DMA_ADDR(*tx_pkts);
         pkt_len = (*tx_pkts)->data_len;
         PMD_INIT_LOG(DEBUG, "tx_xmit: %d dma_addr=0x%"PRIx64" pkt_len=%d", i, buf_dma_addr, pkt_len);
-        if (connectal)
-            connectal->tx_send_pa(buf_dma_addr, pkt_len);
+        connectal->tx_send_pa(buf_dma_addr, pkt_len);
     }
 
 	return i;
