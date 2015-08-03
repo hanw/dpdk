@@ -67,7 +67,7 @@
 #include <rte_string_fns.h>
 
 #include "testpmd.h"
-
+#include "portal.h"
 /*
  * Forwarding of packets in I/O mode.
  * Forward packets "as-is".

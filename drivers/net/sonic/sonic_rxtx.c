@@ -57,6 +57,7 @@
 #include <rte_string_fns.h>
 #include <rte_errno.h>
 #include <rte_ip.h>
+#include <rte_connectal.h>
 
 #include "sonic_rxtx.h"
 #include "sonic_ethdev.h"
@@ -276,14 +277,14 @@ sonic_dev_rx_queue_setup(struct rte_eth_dev *dev,
     PMD_INIT_LOG(DEBUG, "sw_ring=%p hw_ring=%p, dma_addr=0x%"PRIx64,
                  rxq->sw_ring, rxq->rx_ring, rxq->rx_ring_phys_addr);
 
-    //dev->data->rx_queues[queue_idx] = rxq; //FIXME: dma queue
+    rxq->dev = dev;
+
+    dev->data->rx_queues[queue_idx] = rxq;
     sonic_reset_rx_queue(rxq);
 
     // Loopback queue
-    struct pmd_internals *internals = dev->data->dev_private;
-    dev->data->rx_queues[queue_idx] = &internals->rx_sonic_queues[queue_idx];
-
-    rxq->dev = dev;
+    //struct pmd_internals *internals = dev->data->dev_private;
+    //dev->data->rx_queues[queue_idx] = &internals->rx_sonic_queues[queue_idx];
     return 0;
 }
 
@@ -345,12 +346,13 @@ sonic_dev_tx_queue_setup(struct rte_eth_dev *dev,
 	PMD_INIT_LOG(DEBUG, "txq=%p, sw_ring=%p hw_ring=%p dma_addr=0x%"PRIx64,
 		         txq, txq->sw_ring, txq->tx_ring, txq->tx_ring_phys_addr);
 
-	//dev->data->tx_queues[queue_idx] = txq; //FIXME: To use DMA queue
+    txq->dev = dev;
+	dev->data->tx_queues[queue_idx] = txq;
 	sonic_reset_tx_queue(txq);
 
     //Loopback queue
-	struct pmd_internals *internals = dev->data->dev_private;
-	dev->data->tx_queues[queue_idx] = &internals->tx_sonic_queues[queue_idx];
+	//struct pmd_internals *internals = dev->data->dev_private;
+	//dev->data->tx_queues[queue_idx] = &internals->tx_sonic_queues[queue_idx];
 
     return 0;
 }
@@ -472,19 +474,11 @@ uint16_t
 rx_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 	     uint16_t nb_pkts)
 {
-    /**
-     * Poller check if there is any indication
-     */
-
     void **ptrs = (void *)&rx_pkts[0];
 	struct sonic_rx_queue *r = rx_queue;
-	const uint16_t nb_rx = (uint16_t)rte_ring_dequeue_burst(r->rng,
-			ptrs, nb_pkts);
-	if (r->rng->flags & RING_F_SC_DEQ)
-		r->rx_pkts.cnt += nb_rx;
-	else
-		rte_atomic64_add(&(r->rx_pkts), nb_rx);
-	return nb_rx;
+    if (connectal)
+        connectal->poll();
+	return 0;
 }
 
 /*
@@ -496,14 +490,18 @@ tx_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
 {
 	void **ptrs = (void *)&tx_pkts[0];
 	struct sonic_tx_queue *r = tx_queue;
-	const uint16_t nb_tx = (uint16_t)rte_ring_enqueue_burst(r->rng,
-			ptrs, nb_pkts);
-	if (r->rng->flags & RING_F_SP_ENQ) {
-		r->tx_pkts.cnt += nb_tx;
-		r->err_pkts.cnt += nb_pkts - nb_tx;
-	} else {
-		rte_atomic64_add(&(r->tx_pkts), nb_tx);
-		rte_atomic64_add(&(r->err_pkts), nb_pkts - nb_tx);
-	}
-	return nb_tx;
+    /** send to nic */
+    uint64_t buf_dma_addr;
+    uint32_t pkt_len;
+    int i;
+
+    for (i=0; i<nb_pkts; ++i, ++tx_pkts) {
+        buf_dma_addr = RTE_MBUF_DATA_DMA_ADDR(*tx_pkts);
+        pkt_len = (*tx_pkts)->data_len;
+        PMD_INIT_LOG(DEBUG, "tx_xmit: %d dma_addr=0x%"PRIx64" pkt_len=%d", i, buf_dma_addr, pkt_len);
+        if (connectal)
+            connectal->tx_send_pa(buf_dma_addr, pkt_len);
+    }
+
+	return i;
 }

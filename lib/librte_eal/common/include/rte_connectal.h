@@ -18,23 +18,39 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-#ifndef __SONIC_POLLER__
-#define __SONIC_POLLER__
 
-struct PortalPoller {
-    struct pollfd *portal_fds;
-    int pipefd[2];
-    int numa_node;
-    int inited;
-    int numWrappers;
-    int numFds;
-    int timeout;
-    int stopping;
+#ifndef __RTE_CONNECTAL_H__
+#define __RTE_CONNECTAL_H__
+
+#include <stdint.h>
+
+/*
+ * Definitions of all functions exported by connectal.so through the generic
+ * structure *connectal_ops*
+ */
+typedef void (*dma_init_t)(uint32_t fd);
+typedef void (*tx_send_pa_t)(uint64_t base, uint32_t len);
+typedef void (*rx_send_pa_t)(uint64_t base, uint32_t len);
+typedef void (*read_version_t)(void);
+typedef void (*poll_t)(void);
+typedef void (*start_default_poller_t)(void);
+typedef void (*stop_default_poller_t)(void);
+
+/*
+ * @internal. A structure containing the functions exposed by connectal driver.
+ */
+struct connectal_ops {
+    dma_init_t                  dma_init;
+    tx_send_pa_t                tx_send_pa;
+    rx_send_pa_t                rx_send_pa;
+    read_version_t              read_version;
+    poll_t                      poll;
+    start_default_poller_t      start_default_poller;
+    stop_default_poller_t       stop_default_poller;
 };
 
-extern struct PortalPoller *poller;
+int connectal_init(struct connectal_ops* ops);
 
-void poller_init(struct PortalPoller *poller, int numa_node);
-void poller_addFd(struct PortalPoller *poller, int fd);
+extern struct connectal_ops *connectal;
 
 #endif

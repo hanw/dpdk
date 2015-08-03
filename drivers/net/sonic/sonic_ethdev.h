@@ -32,8 +32,6 @@ struct pmd_internals {
 
 	struct sonic_rx_queue rx_sonic_queues[1];
 	struct sonic_tx_queue tx_sonic_queues[1];
-
-    struct connectal_ops *cops;
 };
 
 /*
@@ -63,24 +61,5 @@ int sonic_dev_tx_queue_stop(struct rte_eth_dev *dev, uint16_t tx_queue_id);
 
 uint16_t tx_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts, uint16_t nb_pkts);
 uint16_t rx_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts, uint16_t nb_pkts);
-
-/*
- * Definitions of all functions exported by connectal.so through the generic
- * structure *connectal_ops*
- */
-typedef void (*dma_init_t)(uint32_t fd);
-typedef void (*tx_send_pa_t)(uint64_t base, uint32_t len);
-typedef void (*rx_send_pa_t)(uint64_t base, uint32_t len);
-typedef void (*read_version_t)(void);
-
-/*
- * @internal. A structure containing the functions exposed by connectal driver.
- */
-struct connectal_ops {
-    dma_init_t        dma_init;
-    tx_send_pa_t      tx_send_pa;
-    rx_send_pa_t      rx_send_pa;
-    read_version_t    read_version;
-};
 
 #endif /* _SONIC_ETHDEV_H_ */

@@ -37,6 +37,12 @@ typedef int		bool;
 
 #define SONIC_MAX_RING_DESC 4096
 
+#define RTE_MBUF_DATA_DMA_ADDR(mb) \
+	(uint64_t) ((mb)->buf_physaddr + (mb)->data_off)
+
+#define RTE_MBUF_DATA_DMA_ADDR_DEFAULT(mb) \
+	(uint64_t) ((mb)->buf_physaddr + RTE_PKTMBUF_HEADROOM)
+
 union sonic_tx_desc {
     struct {
         u64 buffer_addr;
@@ -72,6 +78,8 @@ struct sonic_tx_queue {
     uint8_t                port_id;  /* device port identifier */
     uint8_t                ctx_curr; /* current used hardware descriptor */
     uint8_t                ctx_start; /* start context position for Tx queue */
+
+	struct rte_eth_dev *dev; /* pointer to parent dev */
 
     /** ring_queue */
 	struct rte_ring *rng;

@@ -40,7 +40,6 @@ ifndef CONNECTAL_INCLUDE
     $(error CONNECTAL_INCLUDE is undefined, should point to <CONNECTAL>/cpp directory)
 endif
 
-
 #
 # library name
 #
@@ -48,7 +47,6 @@ APP = testpmd
 
 CFLAGS += -O3
 CFLAGS += $(WERROR_FLAGS)
-CFLAGS += $(CONNECTAL_CXXFLAGS)
 
 CFLAGS += -I $(CONNECTAL_INCLUDE)
 CFLAGS += -I $(SONIC_INCLUDE)

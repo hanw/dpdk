@@ -57,51 +57,13 @@
 #include <rte_memcpy.h>
 #include <rte_dev.h>
 #include <rte_kvargs.h>
+#include <rte_connectal.h> /** provides struct connectal_ops *connectal */
 
 #include "sonic_rxtx.h"
 #include "sonic_ethdev.h"
 #include "sonic_logs.h"
 
 #define LENGTH (1024UL * 1024 * 1024)
-
-static struct connectal_ops cops = {
-    .dma_init          = NULL,
-    .tx_send_pa        = NULL,
-    .rx_send_pa        = NULL,
-    .read_version      = NULL,
-};
-static const char *connectal_so = "connectal.so";
-
-static int
-connectal_init(struct connectal_ops *ops)
-{
-    PMD_INIT_FUNC_TRACE();
-    void * handle;
-    handle = dlopen(connectal_so, RTLD_LAZY); //FIXME: refcnt
-    if (!handle) {
-        rte_exit(EXIT_FAILURE, "%s\n", dlerror());
-    }
-
-    ops->dma_init = dlsym(handle, "dma_init");
-    if (ops->dma_init == NULL)
-        goto error;
-
-    ops->tx_send_pa = dlsym(handle, "tx_send_pa");
-    if (ops->tx_send_pa == NULL)
-        goto error;
-
-    ops->rx_send_pa = dlsym(handle, "rx_send_pa");
-    if (ops->rx_send_pa == NULL)
-        goto error;
-
-    ops->read_version = dlsym(handle, "read_version");
-    if (ops->read_version == NULL)
-        goto error;
-
-    return 0;
-error:
-    rte_exit(EXIT_FAILURE, "Unable to load symbol\n");
-}
 
 enum dev_action{
 	DEV_CREATE,
@@ -135,7 +97,6 @@ static void sonic_dev_info_get(struct rte_eth_dev *dev,
 
 static int sonic_dev_link_update(struct rte_eth_dev *dev __rte_unused,
             int wait_to_complete __rte_unused);
-
 
 static const struct eth_dev_ops ops = {
 	.dev_configure        = sonic_dev_configure,
@@ -183,9 +144,8 @@ sonic_dev_configure(struct rte_eth_dev *dev)
     uint64_t offset = pa - base_pa;
     fprintf(stderr, "offset=0x%lx\n", offset);
 
-    if (internals->cops->dma_init) {
-        (internals->cops->dma_init)(fd);
-        internals->cops->read_version();
+    if (connectal->dma_init) {
+        connectal->dma_init(fd);
     }
     return 0;
 }
@@ -385,10 +345,6 @@ rte_sonic_pmd_init(const char *name, const char *params)
 	for (i = 0; i < nb_tx_queues; i++) {
 		internals->tx_sonic_queues[i].rng = rxtx[i];
 	}
-
-    /* load connectal.so */
-    connectal_init(&cops);
-    internals->cops = &cops;
 
 	pci_dev->numa_node = numa_node;
 

@@ -41,6 +41,7 @@ INC += rte_eal_memconfig.h rte_malloc_heap.h
 INC += rte_hexdump.h rte_devargs.h rte_dev.h
 INC += rte_pci_dev_feature_defs.h rte_pci_dev_features.h
 INC += rte_malloc.h
+INC += rte_connectal.h
 
 ifeq ($(CONFIG_RTE_INSECURE_FUNCTION_WARNING),y)
 INC += rte_warnings.h

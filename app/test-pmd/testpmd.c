@@ -39,6 +39,7 @@
 #include <time.h>
 #include <fcntl.h>
 #include <sys/types.h>
+#include <sys/mman.h>
 #include <errno.h>
 
 #include <sys/queue.h>
@@ -48,6 +49,7 @@
 #include <unistd.h>
 #include <inttypes.h>
 
+#include <rte_connectal.h>
 #include <rte_common.h>
 #include <rte_byteorder.h>
 #include <rte_log.h>
@@ -78,7 +80,6 @@
 
 #include "testpmd.h"
 #include "mempool_osdep.h"
-#include "poller.h"
 
 uint16_t verbose_level = 0; /**< Silent by default. */
 
@@ -899,6 +900,7 @@ run_pkt_fwd_on_lcore(struct fwd_lcore *fc, packet_fwd_t pkt_fwd)
 	fsm = &fwd_streams[fc->stream_idx];
 	nb_fs = fc->stream_nb;
     printf("nb_tx_limits=%d %d\n", nb_tx_limits, (unsigned int)nb_tx_limits);
+    connectal->stop_default_poller();
 	do {
 		for (sm_id = 0; sm_id < nb_fs; sm_id++) {
 			(*pkt_fwd)(fsm[sm_id]);
@@ -909,6 +911,7 @@ run_pkt_fwd_on_lcore(struct fwd_lcore *fc, packet_fwd_t pkt_fwd)
 #endif
         }
 	} while (! fc->stopped);
+    connectal->start_default_poller();
 }
 
 static int
@@ -1974,15 +1977,6 @@ init_port(void)
 		ports[pid].enabled = 1;
 }
 
-static void
-setup_shared_poller(int numa_node)
-{
-    poller = rte_zmalloc_socket("name", sizeof(*poller), 0, numa_node);
-    if (poller == NULL)
-        rte_panic("Cannot alloc poller\n");
-    poller_init(poller, numa_node);
-}
-
 int
 main(int argc, char** argv)
 {
@@ -1997,11 +1991,11 @@ main(int argc, char** argv)
 	if (nb_ports == 0)
 		RTE_LOG(WARNING, EAL, "No probed ethernet devices\n");
 
+    /* initialize connectal api */
+    connectal_init(connectal);
+
 	/* allocate port structures, and init them */
 	init_port();
-
-    /* setup shared poller */
-    setup_shared_poller(0); //FIXME: assume socket 0
 
 	set_def_fwd_config();
 	if (nb_lcores == 0)
