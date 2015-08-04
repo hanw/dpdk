@@ -145,7 +145,7 @@ sonic_dev_configure(struct rte_eth_dev *dev)
     fprintf(stderr, "offset=0x%lx\n", offset);
 
     if (connectal->dma_init) {
-        connectal->dma_init(fd);
+        connectal->dma_init(fd, base_pa, LENGTH);
     }
     return 0;
 }

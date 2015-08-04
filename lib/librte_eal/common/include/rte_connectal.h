@@ -28,7 +28,7 @@
  * Definitions of all functions exported by connectal.so through the generic
  * structure *connectal_ops*
  */
-typedef void (*dma_init_t)(uint32_t fd);
+typedef void (*dma_init_t)(uint32_t fd, uint64_t base, uint32_t len);
 typedef void (*tx_send_pa_t)(uint64_t base, uint32_t len);
 typedef void (*rx_send_pa_t)(uint64_t base, uint32_t len);
 typedef void (*read_version_t)(void);
