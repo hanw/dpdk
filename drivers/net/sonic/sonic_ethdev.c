@@ -144,8 +144,8 @@ sonic_dev_configure(struct rte_eth_dev *dev)
     uint64_t offset = pa - base_pa;
     fprintf(stderr, "offset=0x%lx\n", offset);
 
-    if (connectal->dma_init) {
-        connectal->dma_init(fd, base_pa, LENGTH);
+    if (connectal->init) {
+        connectal->init(fd, base_pa, LENGTH);
     }
     return 0;
 }

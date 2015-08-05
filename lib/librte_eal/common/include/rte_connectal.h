@@ -28,25 +28,29 @@
  * Definitions of all functions exported by connectal.so through the generic
  * structure *connectal_ops*
  */
-typedef void (*dma_init_t)(uint32_t fd, uint64_t base, uint32_t len);
+typedef void (*init_t)(uint32_t fd, uint64_t base, uint32_t len);
 typedef void (*tx_send_pa_t)(uint64_t base, uint32_t len);
 typedef void (*rx_send_pa_t)(uint64_t base, uint32_t len);
 typedef void (*read_version_t)(void);
 typedef void (*poll_t)(void);
 typedef void (*start_default_poller_t)(void);
 typedef void (*stop_default_poller_t)(void);
+typedef uint32_t (*tx_credit_available_t)(void);
+typedef void (*tx_credit_decrement_t)(uint32_t v);
 
 /*
  * @internal. A structure containing the functions exposed by connectal driver.
  */
 struct connectal_ops {
-    dma_init_t                  dma_init;
+    init_t                      init;
     tx_send_pa_t                tx_send_pa;
     rx_send_pa_t                rx_send_pa;
     read_version_t              read_version;
     poll_t                      poll;
     start_default_poller_t      start_default_poller;
     stop_default_poller_t       stop_default_poller;
+    tx_credit_available_t       tx_credit_available;
+    tx_credit_decrement_t       tx_credit_decrement;
 };
 
 int connectal_init(struct connectal_ops* ops);

@@ -42,25 +42,29 @@ connectal_init(struct connectal_ops *ops)
         rte_exit(EXIT_FAILURE, "%s\n", dlerror());
     }
 
-    LOAD_SYMBOL(dma_init);
+    LOAD_SYMBOL(init);
     LOAD_SYMBOL(tx_send_pa);
     LOAD_SYMBOL(rx_send_pa);
     LOAD_SYMBOL(read_version);
     LOAD_SYMBOL(poll);
     LOAD_SYMBOL(start_default_poller);
     LOAD_SYMBOL(stop_default_poller);
+    LOAD_SYMBOL(tx_credit_available);
+    LOAD_SYMBOL(tx_credit_decrement);
 
     return 0;
 }
 
 static struct connectal_ops ops = {
-    .dma_init          = NULL,
+    .init              = NULL,
     .tx_send_pa        = NULL,
     .rx_send_pa        = NULL,
     .read_version      = NULL,
     .poll              = NULL,
     .start_default_poller = NULL,
     .stop_default_poller  = NULL,
+    .tx_credit_available = NULL,
+    .tx_credit_decrement = NULL,
 };
 
 struct connectal_ops *connectal = &ops;

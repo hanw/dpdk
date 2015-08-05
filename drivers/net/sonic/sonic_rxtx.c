@@ -67,15 +67,10 @@
 
 #define SONIC_ALIGN 128
 
-/*
- * Maximum number of Ring Descriptors.
- *
- * Since RDLEN/TDLEN should be multiple of 128 bytes, the number of ring
- * descriptors should meet the following condition:
- *      (num_ring_desc * sizeof(rx/tx descriptor)) % 128 == 0
- */
 #define SONIC_MIN_RING_DESC 32
 #define SONIC_MAX_RING_DESC 4096
+
+#define SONIC_TX_CREDIT 128
 
 static inline struct rte_mbuf *
 rte_rxmbuf_alloc(struct rte_mempool *mp)
@@ -472,12 +467,12 @@ eth_sonic_tx_init(struct rte_eth_dev *dev)
  */
 uint16_t
 rx_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
-	     uint16_t nb_pkts)
+        uint16_t nb_pkts)
 {
     void **ptrs = (void *)&rx_pkts[0];
-	struct sonic_rx_queue *r = rx_queue;
+    struct sonic_rx_queue *r = rx_queue;
     connectal->poll();
-	return 0;
+    return 0;
 }
 
 /*
@@ -485,21 +480,25 @@ rx_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
  */
 uint16_t
 tx_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
-	     uint16_t nb_pkts)
+        uint16_t nb_pkts)
 {
-	void **ptrs = (void *)&tx_pkts[0];
-	struct sonic_tx_queue *r = tx_queue;
-    /** send to nic */
+    void **ptrs = (void *)&tx_pkts[0];
+    struct sonic_tx_queue *r = tx_queue;
     uint64_t buf_dma_addr;
     uint32_t pkt_len;
     int i;
+
+    if (connectal->tx_credit_available() < nb_pkts)
+        return 0;
 
     for (i=0; i<nb_pkts; ++i, ++tx_pkts) {
         buf_dma_addr = RTE_MBUF_DATA_DMA_ADDR(*tx_pkts);
         pkt_len = (*tx_pkts)->data_len;
         PMD_INIT_LOG(DEBUG, "tx_xmit: %d dma_addr=0x%"PRIx64" pkt_len=%d", i, buf_dma_addr, pkt_len);
+        // check credit before sending pa
         connectal->tx_send_pa(buf_dma_addr, pkt_len);
+        connectal->tx_credit_decrement(1);
     }
-
-	return i;
+    return i;
 }
+
