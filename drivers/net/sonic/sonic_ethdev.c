@@ -63,8 +63,6 @@
 #include "sonic_ethdev.h"
 #include "sonic_logs.h"
 
-#define LENGTH (1024UL * 1024 * 1024)
-
 enum dev_action{
 	DEV_CREATE,
 	DEV_ATTACH
@@ -125,28 +123,10 @@ static int
 sonic_dev_configure(struct rte_eth_dev *dev)
 {
     PMD_INIT_FUNC_TRACE();
-    char filepath[128];
 	struct pmd_internals *internals;
 	if (dev == NULL)
 		return;
 	internals = dev->data->dev_private;
-
-    rte_eal_hugepage_path(filepath, sizeof(filepath), 0);
-    int fd = open(filepath, O_CREAT | O_RDWR, 0755);
-
-    void *va = NULL;
-    va = rte_zmalloc("dummy", 1000, 8);
-    phys_addr_t pa = rte_malloc_virt2phy(va);
-    fprintf(stderr, "va=%p, pa=0x%lx\n", va, pa);
-
-    uint64_t base_pa = get_base_phys_addr();
-
-    uint64_t offset = pa - base_pa;
-    fprintf(stderr, "offset=0x%lx\n", offset);
-
-    if (connectal->init) {
-        connectal->init(fd, base_pa, LENGTH);
-    }
     return 0;
 }
 
@@ -159,11 +139,10 @@ sonic_dev_start(struct rte_eth_dev *dev)
 {
     int ret;
     PMD_INIT_FUNC_TRACE();
-	if (dev == NULL)
-		return -EINVAL;
+    if (dev == NULL)
+        return -EINVAL;
 
     // check if communication with FPGA yields magic number.
-
     PMD_INIT_LOG(DEBUG, "start device on port %d", dev->data->port_id);
     eth_sonic_tx_init(dev);
 
@@ -173,7 +152,14 @@ sonic_dev_start(struct rte_eth_dev *dev)
         //sonic_dev_clear_queues(dev); //FIXME: fix memory leak
         return ret;
     }
-	dev->data->dev_link.link_status = 1;
+
+    ret = sonic_dev_rxtx_start(dev);
+    if (ret) {
+        PMD_INIT_LOG(ERR, "Unable to start rxtx queues");
+        return ret;
+    }
+
+    dev->data->dev_link.link_status = 1;
     return 0;
 }
 
@@ -205,24 +191,10 @@ sonic_dev_close(struct rte_eth_dev *dev)
 static void
 sonic_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 {
-    PMD_INIT_FUNC_TRACE();
+    //PMD_INIT_FUNC_TRACE();
 	unsigned i;
 	unsigned long rx_total = 0, tx_total = 0, tx_err_total = 0;
 	const struct pmd_internals *internal = dev->data->dev_private;
-
-	for (i = 0; i < RTE_ETHDEV_QUEUE_STAT_CNTRS &&
-			i < internal->nb_rx_queues; i++) {
-		stats->q_ipackets[i] = internal->rx_sonic_queues[i].rx_pkts.cnt;
-		rx_total += stats->q_ipackets[i];
-	}
-
-	for (i = 0; i < RTE_ETHDEV_QUEUE_STAT_CNTRS &&
-			i < internal->nb_tx_queues; i++) {
-		stats->q_opackets[i] = internal->tx_sonic_queues[i].tx_pkts.cnt;
-		stats->q_errors[i] = internal->tx_sonic_queues[i].err_pkts.cnt;
-		tx_total += stats->q_opackets[i];
-		tx_err_total += stats->q_errors[i];
-	}
 
 	stats->ipackets = rx_total;
 	stats->opackets = tx_total;
@@ -232,15 +204,9 @@ sonic_dev_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 static void
 sonic_dev_stats_reset(struct rte_eth_dev *dev)
 {
-    PMD_INIT_FUNC_TRACE();
+    //PMD_INIT_FUNC_TRACE();
 	unsigned i;
 	struct pmd_internals *internal = dev->data->dev_private;
-	for (i = 0; i < internal->nb_rx_queues; i++)
-		internal->rx_sonic_queues[i].rx_pkts.cnt = 0;
-	for (i = 0; i < internal->nb_tx_queues; i++) {
-		internal->tx_sonic_queues[i].tx_pkts.cnt = 0;
-		internal->tx_sonic_queues[i].err_pkts.cnt = 0;
-	}
 }
 
 static void
@@ -266,7 +232,7 @@ sonic_dev_info_get(struct rte_eth_dev *dev, struct rte_eth_dev_info *dev_info)
 static int
 sonic_dev_link_update(struct rte_eth_dev *dev __rte_unused,
 		int wait_to_complete __rte_unused) {
-    PMD_INIT_FUNC_TRACE();
+    //PMD_INIT_FUNC_TRACE();
     return 0;
 }
 
@@ -327,24 +293,24 @@ rte_sonic_pmd_init(const char *name, const char *params)
 	/* rx and tx are so-called from point of view of first port.
 	 * They are inverted from the point of view of second port
 	 */
-	struct rte_ring *rxtx[RTE_PMD_RING_MAX_RX_RINGS];
-	char rng_name[RTE_RING_NAMESIZE];
-	unsigned num_rings = RTE_MIN(RTE_PMD_RING_MAX_RX_RINGS,
-			RTE_PMD_RING_MAX_TX_RINGS);
-
-	for (i = 0; i < num_rings; i++) {
-		snprintf(rng_name, sizeof(rng_name), "ETH_RXTX%u_%s", i, name);
-		rxtx[i] = rte_ring_create(rng_name, 1024, numa_node,
-						          RING_F_SP_ENQ|RING_F_SC_DEQ);
-		if (rxtx[i] == NULL)
-			return -1;
-	}
-	for (i = 0; i < nb_rx_queues; i++) {
-		internals->rx_sonic_queues[i].rng = rxtx[i];
-	}
-	for (i = 0; i < nb_tx_queues; i++) {
-		internals->tx_sonic_queues[i].rng = rxtx[i];
-	}
+//	struct rte_ring *rxtx[RTE_PMD_RING_MAX_RX_RINGS];
+//	char rng_name[RTE_RING_NAMESIZE];
+//	unsigned num_rings = RTE_MIN(RTE_PMD_RING_MAX_RX_RINGS,
+//			RTE_PMD_RING_MAX_TX_RINGS);
+//
+//	for (i = 0; i < num_rings; i++) {
+//		snprintf(rng_name, sizeof(rng_name), "ETH_RXTX%u_%s", i, name);
+//		rxtx[i] = rte_ring_create(rng_name, 1024, numa_node,
+//						          RING_F_SP_ENQ|RING_F_SC_DEQ);
+//		if (rxtx[i] == NULL)
+//			return -1;
+//	}
+//	for (i = 0; i < nb_rx_queues; i++) {
+//		internals->rx_sonic_queues[i].rng = rxtx[i];
+//	}
+//	for (i = 0; i < nb_tx_queues; i++) {
+//		internals->tx_sonic_queues[i].rng = rxtx[i];
+//	}
 
 	pci_dev->numa_node = numa_node;
 

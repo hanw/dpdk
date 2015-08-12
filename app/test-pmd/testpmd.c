@@ -1050,8 +1050,9 @@ start_packet_forwarding(int with_tx_first)
 		rte_eal_mp_wait_lcore();
 		port_fwd_end = tx_only_engine.port_fwd_end;
 		if (port_fwd_end != NULL) {
-			for (i = 0; i < cur_fwd_config.nb_fwd_ports; i++)
+			for (i = 0; i < cur_fwd_config.nb_fwd_ports; i++) {
 				(*port_fwd_end)(fwd_ports_ids[i]);
+            }
 		}
 	}
 	launch_packet_forwarding(start_pkt_forward_on_core);
@@ -1977,11 +1978,13 @@ init_port(void)
 		ports[pid].enabled = 1;
 }
 
+#define LENGTH (1024UL * 1024 * 1024)
 int
 main(int argc, char** argv)
 {
 	int  diag;
 	uint8_t port_id;
+    char filepath[128];
 
 	diag = rte_eal_init(argc, argv);
 	if (diag < 0)
@@ -1993,6 +1996,11 @@ main(int argc, char** argv)
 
     /* initialize connectal api */
     connectal_init(connectal);
+
+    rte_eal_hugepage_path(filepath, sizeof(filepath), 0);
+    int fd = open(filepath, O_CREAT | O_RDWR, 0755);
+    uint64_t base_pa = get_base_phys_addr();
+    connectal->init(fd, base_pa, LENGTH);
 
 	/* allocate port structures, and init them */
 	init_port();

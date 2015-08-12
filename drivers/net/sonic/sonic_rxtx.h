@@ -29,13 +29,13 @@ typedef int64_t		s64;
 typedef int32_t		s32;
 typedef int16_t		s16;
 typedef int8_t		s8;
-typedef int		bool;
 
 #define __le16		u16
 #define __le32		u32
 #define __le64      u64
 
 #define SONIC_MAX_RING_DESC 4096
+#define SONIC_RX_MAX_BURST 32
 
 #define RTE_MBUF_DATA_DMA_ADDR(mb) \
 	(uint64_t) ((mb)->buf_physaddr + (mb)->data_off)
@@ -48,13 +48,6 @@ union sonic_tx_desc {
         u64 buffer_addr;
         u32 cmd_type_len;
         u32 olinfo_status;
-    } read;
-};
-
-union sonic_rx_desc {
-    struct {
-        __le64 pkt_addr;
-        __le64 hdr_addr;
     } read;
 };
 
@@ -78,41 +71,31 @@ struct sonic_tx_queue {
     uint8_t                port_id;  /* device port identifier */
     uint8_t                ctx_curr; /* current used hardware descriptor */
     uint8_t                ctx_start; /* start context position for Tx queue */
-
-	struct rte_eth_dev *dev; /* pointer to parent dev */
-
-    /** ring_queue */
-	struct rte_ring *rng;
-	rte_atomic64_t rx_pkts;
-	rte_atomic64_t tx_pkts;
-	rte_atomic64_t err_pkts;
+    struct rte_eth_dev    *dev; /* pointer to parent dev */
 };
 
 
 struct sonic_rx_entry {
     struct rte_mbuf *mbuf;    /* mbuf associated with Rx descriptor */
+    __le64 dma_addr;
 };
 
 /**
  * Structure associated with each RX queue.
  */
 struct sonic_rx_queue {
-
-    struct rte_mempool *mb_pool;    /* mbuf pool to populate Rx ring */
-    volatile union sonic_rx_desc *rx_ring; /* Rx ring virtual address */
-    uint64_t         rx_ring_phys_addr; /* Rx ring DMA address */
+    struct rte_mempool    *mb_pool; /* mbuf pool to populate Rx ring */
     struct sonic_rx_entry *sw_ring; /* adddress of Rx software ring */
-    uint16_t         nb_rx_desc;    /* number of Rx descriptors */
-    uint16_t         queue_id;      /* Rx queue index */
-    uint8_t          port_id;       /* Device port identifier */
+    uint16_t               nb_slots; /* number of Rx slots */
+    uint16_t               queue_id; /* Rx queue index */
+    uint16_t               port_id; /* Device port identifier */
 
-	struct rte_eth_dev *dev; /* pointer to parent dev */
+    uint16_t               rx_nb_avail; /* nbr of staged pkts to ret to app */
+    uint16_t               rx_next_avail; /* idx of next staged pkt to ret to app */
+    uint16_t               rx_free_trigger; /* trigger rx buffer allocation */
 
-    /** ring_queue */
-	struct rte_ring *rng;
-	rte_atomic64_t rx_pkts;
-	rte_atomic64_t tx_pkts;
-	rte_atomic64_t err_pkts;
+    struct rte_eth_dev    *dev; /* pointer to parent dev */
+    struct rte_mbuf       *rx_stage[SONIC_RX_MAX_BURST * 2];
 };
 
 #endif

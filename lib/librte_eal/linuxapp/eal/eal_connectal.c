@@ -37,7 +37,7 @@ int
 connectal_init(struct connectal_ops *ops)
 {
     void * handle;
-    handle = dlopen(connectal_so, RTLD_LAZY); //FIXME: refcnt
+    handle = dlopen(connectal_so, RTLD_LAZY);
     if (!handle) {
         rte_exit(EXIT_FAILURE, "%s\n", dlerror());
     }
@@ -51,6 +51,8 @@ connectal_init(struct connectal_ops *ops)
     LOAD_SYMBOL(stop_default_poller);
     LOAD_SYMBOL(tx_credit_available);
     LOAD_SYMBOL(tx_credit_decrement);
+    LOAD_SYMBOL(rx_credit_available);
+    LOAD_SYMBOL(rx_credit_increment);
 
     return 0;
 }
@@ -65,6 +67,8 @@ static struct connectal_ops ops = {
     .stop_default_poller  = NULL,
     .tx_credit_available = NULL,
     .tx_credit_decrement = NULL,
+    .rx_credit_available = NULL,
+    .rx_credit_increment = NULL,
 };
 
 struct connectal_ops *connectal = &ops;
