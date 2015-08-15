@@ -1638,3 +1638,40 @@ get_base_phys_addr(void)
 
     return phys_addr;
 }
+
+void
+print_packet_data(uint64_t physaddr, uint32_t len)
+{
+    const struct rte_mem_config *mcfg = rte_eal_get_configuration()->mem_config;
+    const struct hugepage_file *hp=NULL;
+    unsigned num_hp = 0;
+    unsigned i, j, s;
+    int fd_hugepage=-1;
+    off_t size;
+    fd_hugepage = open(eal_hugepage_info_path(), O_RDONLY);
+    size = getFileSize(fd_hugepage);
+    hp = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd_hugepage, 0);
+    num_hp = size / sizeof(struct hugepage_file);
+
+    s=0;
+    uint64_t base_physaddr;
+    while(s < RTE_MAX_MEMSEG && mcfg->memseg[s].len>0) {
+        void *base_addr;
+
+        base_addr = mcfg->memseg[s].addr;
+        for (i = 0; i < num_hp; i++){
+            ptrdiff_t offset=0;
+            base_physaddr = hp[i].physaddr;
+            offset = physaddr - base_physaddr;
+            fprintf(stderr, "Packet at offset %"PRIx64":\n", offset);
+            for (j=0; j<len / sizeof(uint64_t); j++) {
+                if (j%8 == 0) fprintf(stderr, "%p ", (uint64_t *)(((char*)base_addr)+offset)+j);
+                fprintf(stderr, "%016lx ", *((uint64_t*)((char *)base_addr+offset)+j));
+                if ((j+1) % 8 == 0) fprintf(stderr, "\n");
+            }
+        }
+        s++;
+    }
+}
+
+

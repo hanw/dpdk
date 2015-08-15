@@ -220,5 +220,6 @@ int rte_xen_dom0_memory_attach(void);
 #endif
 
 uint64_t get_base_phys_addr(void);
+void print_packet_data(uint64_t offset, uint32_t len);
 
 #endif /* _RTE_MEMORY_H_ */

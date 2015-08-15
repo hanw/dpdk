@@ -143,7 +143,6 @@ sonic_dev_start(struct rte_eth_dev *dev)
         return -EINVAL;
 
     // check if communication with FPGA yields magic number.
-    PMD_INIT_LOG(DEBUG, "start device on port %d", dev->data->port_id);
     eth_sonic_tx_init(dev);
 
     ret = eth_sonic_rx_init(dev);
@@ -170,10 +169,11 @@ static void
 sonic_dev_stop(struct rte_eth_dev *dev)
 {
     PMD_INIT_FUNC_TRACE();
-	if (dev == NULL)
-		return;
+    if (dev == NULL)
+        return;
 
-	dev->data->dev_link.link_status = 0;
+    connectal->reset_rx(0);
+    dev->data->dev_link.link_status = 0;
 }
 
 /*

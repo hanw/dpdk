@@ -429,7 +429,6 @@ rte_mempool_xmem_create(const char *name, unsigned n, unsigned elt_size,
 	void *startaddr;
 	int page_size = getpagesize();
 
-    RTE_LOG(DEBUG, MEMPOOL, "create mempool\n");
 	/* compilation-time checks */
 	RTE_BUILD_BUG_ON((sizeof(struct rte_mempool) &
 			  RTE_CACHE_LINE_MASK) != 0);
@@ -493,7 +492,6 @@ rte_mempool_xmem_create(const char *name, unsigned n, unsigned elt_size,
 	r = rte_ring_create(rg_name, rte_align32pow2(n+1), socket_id, rg_flags);
 	if (r == NULL)
 		goto exit;
-    RTE_LOG(DEBUG, MEMPOOL, "create ring %s\n", rg_name);
 
 	/*
 	 * reserve a memory zone for this mempool: private data is
@@ -544,7 +542,6 @@ rte_mempool_xmem_create(const char *name, unsigned n, unsigned elt_size,
 
 	mz = rte_memzone_reserve(mz_name, mempool_size, socket_id, mz_flags);
 
-    RTE_LOG(DEBUG, MEMPOOL, "memzone reserve %s, mempool_size=%ld\n", mz_name, mempool_size);
 	/*
 	 * no more memory: in this case we loose previously reserved
 	 * space for the ring as we cannot free it

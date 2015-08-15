@@ -51,9 +51,7 @@ connectal_init(struct connectal_ops *ops)
     LOAD_SYMBOL(stop_default_poller);
     LOAD_SYMBOL(tx_credit_available);
     LOAD_SYMBOL(tx_credit_decrement);
-    LOAD_SYMBOL(rx_credit_available);
-    LOAD_SYMBOL(rx_credit_increment);
-
+    LOAD_SYMBOL(reset_rx);
     return 0;
 }
 
@@ -67,8 +65,7 @@ static struct connectal_ops ops = {
     .stop_default_poller  = NULL,
     .tx_credit_available = NULL,
     .tx_credit_decrement = NULL,
-    .rx_credit_available = NULL,
-    .rx_credit_increment = NULL,
+    .reset_rx          = NULL,
 };
 
 struct connectal_ops *connectal = &ops;

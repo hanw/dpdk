@@ -62,11 +62,8 @@ struct sonic_tx_entry {
  */
 struct sonic_tx_queue {
     // Let's see if we can get tx_queue to work without a descriptor.
-    volatile union sonic_tx_desc *tx_ring; /* Tx ring address */
-    uint64_t               tx_ring_phys_addr;  /* Tx ring DMA address */
     struct sonic_tx_entry *sw_ring; /* virtual address of sw ring */
     uint16_t               nb_tx_desc; /* number of Tx desc */
-    uint16_t               tx_head; /* index of first used tx desc */
     uint16_t               queue_id; /* tx queue index */
     uint8_t                port_id;  /* device port identifier */
     uint8_t                ctx_curr; /* current used hardware descriptor */
@@ -92,7 +89,10 @@ struct sonic_rx_queue {
 
     uint16_t               rx_nb_avail; /* nbr of staged pkts to ret to app */
     uint16_t               rx_next_avail; /* idx of next staged pkt to ret to app */
-    uint16_t               rx_free_trigger; /* trigger rx buffer allocation */
+    uint16_t               rx_last_allocated; /* trigger rx buffer allocation */
+    uint16_t               rx_tail; /* last received packet idx */
+
+    uint16_t               sampling;
 
     struct rte_eth_dev    *dev; /* pointer to parent dev */
     struct rte_mbuf       *rx_stage[SONIC_RX_MAX_BURST * 2];

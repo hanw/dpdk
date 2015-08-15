@@ -37,8 +37,7 @@ typedef void (*start_default_poller_t)(void);
 typedef void (*stop_default_poller_t)(void);
 typedef int  (*tx_credit_available_t)(void);
 typedef void (*tx_credit_decrement_t)(uint32_t v);
-typedef int  (*rx_credit_available_t)(void);
-typedef void (*rx_credit_increment_t)(uint32_t v);
+typedef void (*reset_rx_t)(uint32_t v);
 
 /*
  * @internal. A structure containing the functions exposed by connectal driver.
@@ -53,8 +52,7 @@ struct connectal_ops {
     stop_default_poller_t       stop_default_poller;
     tx_credit_available_t       tx_credit_available;
     tx_credit_decrement_t       tx_credit_decrement;
-    rx_credit_available_t       rx_credit_available;
-    rx_credit_increment_t       rx_credit_increment;
+    reset_rx_t                  reset_rx;
 };
 
 int connectal_init(struct connectal_ops* ops);
