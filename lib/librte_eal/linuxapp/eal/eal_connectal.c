@@ -46,7 +46,7 @@ connectal_init(struct connectal_ops *ops)
     LOAD_SYMBOL(tx_send_pa);
     LOAD_SYMBOL(rx_send_pa);
     LOAD_SYMBOL(read_version);
-    LOAD_SYMBOL(poll);
+    LOAD_SYMBOL(sonic_poll);
     LOAD_SYMBOL(start_default_poller);
     LOAD_SYMBOL(stop_default_poller);
     LOAD_SYMBOL(tx_credit_available);
@@ -60,7 +60,7 @@ static struct connectal_ops ops = {
     .tx_send_pa        = NULL,
     .rx_send_pa        = NULL,
     .read_version      = NULL,
-    .poll              = NULL,
+    .sonic_poll           = NULL,
     .start_default_poller = NULL,
     .stop_default_poller  = NULL,
     .tx_credit_available = NULL,

@@ -47,7 +47,7 @@ struct connectal_ops {
     tx_send_pa_t                tx_send_pa;
     rx_send_pa_t                rx_send_pa;
     read_version_t              read_version;
-    poll_t                      poll;
+    poll_t                      sonic_poll;
     start_default_poller_t      start_default_poller;
     stop_default_poller_t       stop_default_poller;
     tx_credit_available_t       tx_credit_available;
